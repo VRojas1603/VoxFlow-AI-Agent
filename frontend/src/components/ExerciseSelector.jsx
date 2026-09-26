@@ -1,5 +1,20 @@
 import React from 'react';
-import { Wind, Activity, Flame, Music2, Check, Sliders } from 'lucide-react';
+import {
+  Wind,
+  Activity,
+  Flame,
+  Music2,
+  Check,
+  Sliders,
+  Play,
+  Square,
+  Volume2,
+  VolumeX,
+  Plus,
+  Minus,
+  Radio,
+  Sparkles,
+} from 'lucide-react';
 
 const EXERCISES = [
   {
@@ -7,7 +22,7 @@ const EXERCISES = [
     name: 'Diaphragmatic Breathing',
     category: 'Preparation',
     duration: '2 min',
-    desc: 'Low 4-count inhale with controlled, steady "S" sound exhalation.',
+    desc: 'Low 4-count inhale with rhythmic metronome & steady "S" exhale.',
     icon: Wind,
   },
   {
@@ -15,7 +30,7 @@ const EXERCISES = [
     name: 'Lip Trill (Lip Bubbles)',
     category: 'Vocal Cords',
     duration: '3 min',
-    desc: 'Gentle lip vibration over 3-note and 5-note scales ("brrr").',
+    desc: 'Classic 5-note piano scale ("brrr") ascending by half-steps.',
     icon: Flame,
   },
   {
@@ -23,7 +38,7 @@ const EXERCISES = [
     name: 'Vocal Sirens',
     category: 'Resonance',
     duration: '3 min',
-    desc: 'Smooth glissando sliding from low register to high register.',
+    desc: 'Continuous acoustic glissando sweep between chest & head voice.',
     icon: Activity,
   },
   {
@@ -31,29 +46,50 @@ const EXERCISES = [
     name: 'Free Song Practice',
     category: 'Repertoire',
     duration: '5 min',
-    desc: 'Sing any phrase freely and get immediate vocal coach guidance.',
+    desc: 'Looping acoustic piano chord progression with real-time feedback.',
     icon: Music2,
   },
 ];
 
-export function ExerciseSelector({ activeExercise, onSelectExercise, playbackSettings }) {
+export function ExerciseSelector({
+  activeExercise,
+  onSelectExercise,
+  playbackSettings,
+  isPlayingAccompaniment,
+  onToggleAccompaniment,
+  currentNote,
+  accompanimentVolume = 0.4,
+  onVolumeChange,
+  onPitchAdjust,
+  onSpeedAdjust,
+}) {
+  const pitchShift = playbackSettings?.pitchShift || 0;
+  const speed = playbackSettings?.speed || 1.0;
+
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur-sm">
-      <div className="flex items-center justify-between mb-4">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur-sm flex flex-col gap-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-white m-0">Training Routine</h2>
+          <h2 className="text-base font-semibold text-white m-0 flex items-center gap-2">
+            <span>Training Routine</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-medium">
+              4 Routines
+            </span>
+          </h2>
           <p className="text-xs text-slate-400 m-0">You can ask Lyra to switch exercises by voice</p>
         </div>
-        {playbackSettings && (
-          <div className="flex items-center gap-2 text-xs bg-slate-800/80 px-2.5 py-1 rounded-lg text-purple-300 border border-purple-500/20">
-            <Sliders className="w-3.5 h-3.5 text-purple-400" />
-            <span>Key: {playbackSettings.pitchShift >= 0 ? `+${playbackSettings.pitchShift}` : playbackSettings.pitchShift} st</span>
-            <span>•</span>
-            <span>Speed: {playbackSettings.speed}x</span>
-          </div>
-        )}
+
+        {/* Key & Speed summary badge */}
+        <div className="flex items-center gap-2 text-xs bg-slate-800/80 px-2.5 py-1 rounded-lg text-purple-300 border border-purple-500/20">
+          <Sliders className="w-3.5 h-3.5 text-purple-400" />
+          <span>Key: {pitchShift >= 0 ? `+${pitchShift}` : pitchShift} st</span>
+          <span>•</span>
+          <span>Speed: {speed}x</span>
+        </div>
       </div>
 
+      {/* Exercise Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {EXERCISES.map((ex) => {
           const Icon = ex.icon;
@@ -94,6 +130,112 @@ export function ExerciseSelector({ activeExercise, onSelectExercise, playbackSet
             </button>
           );
         })}
+      </div>
+
+      {/* Interactive Scale Accompaniment & Reference Player Bar */}
+      <div className="rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/60 to-slate-900/40 p-3.5 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Play/Stop Button & Live Note Status */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onToggleAccompaniment}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-md ${
+                isPlayingAccompaniment
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
+                  : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 shadow-purple-600/20'
+              }`}
+            >
+              {isPlayingAccompaniment ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" /> Stop Scale
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 fill-current" /> Play Accompaniment
+                </>
+              )}
+            </button>
+
+            {/* Live Playing Note Pill */}
+            <div className="flex items-center gap-2">
+              {isPlayingAccompaniment && currentNote ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-200 text-xs font-medium animate-pulse">
+                  <Radio className="w-3 h-3 text-purple-400 animate-spin" />
+                  <span className="font-semibold">{currentNote.noteName}</span>
+                  {currentNote.freq && (
+                    <span className="text-[10px] text-purple-400">({currentNote.freq} Hz)</span>
+                  )}
+                </div>
+              ) : (
+                <span className="text-xs text-slate-400 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-purple-400" /> Reference piano scale & metronome
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Pitch & Speed Transposition Buttons */}
+          <div className="flex items-center gap-2">
+            {/* Pitch Shift Controls */}
+            <div className="flex items-center gap-1 bg-slate-800/80 border border-slate-700/60 rounded-lg p-1 text-xs">
+              <span className="text-[11px] text-slate-400 px-1">Key:</span>
+              <button
+                onClick={() => onPitchAdjust && onPitchAdjust(-1)}
+                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Transpose down 1 semitone"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="font-semibold text-white px-1">
+                {pitchShift >= 0 ? `+${pitchShift}` : pitchShift}
+              </span>
+              <button
+                onClick={() => onPitchAdjust && onPitchAdjust(1)}
+                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Transpose up 1 semitone"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Tempo Multipliers */}
+            <div className="flex items-center gap-1 bg-slate-800/80 border border-slate-700/60 rounded-lg p-1 text-xs">
+              <span className="text-[11px] text-slate-400 px-1">Speed:</span>
+              {[0.85, 1.0, 1.15].map((spd) => (
+                <button
+                  key={spd}
+                  onClick={() => onSpeedAdjust && onSpeedAdjust(spd)}
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                    speed === spd
+                      ? 'bg-purple-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
+            {/* Volume Slider */}
+            <div className="hidden md:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/60 rounded-lg px-2 py-1 text-xs">
+              {accompanimentVolume > 0 ? (
+                <Volume2 className="w-3.5 h-3.5 text-slate-400" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+              )}
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={accompanimentVolume}
+                onChange={(e) => onVolumeChange && onVolumeChange(parseFloat(e.target.value))}
+                className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                title={`Accompaniment Volume: ${Math.round(accompanimentVolume * 100)}%`}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
+import { scaleEngine } from '../audio/scaleEngine';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -24,20 +25,38 @@ export function useVoiceAgent() {
   const [activeTip, setActiveTip] = useState(null);
   const [playbackSettings, setPlaybackSettings] = useState({ pitchShift: 0, speed: 1.0 });
   const [activeExercise, setActiveExercise] = useState('warmup_breathing');
+  const [isPlayingAccompaniment, setIsPlayingAccompaniment] = useState(false);
+  const [currentNote, setCurrentNote] = useState(null);
+  const [accompanimentVolume, setAccompanimentVolumeState] = useState(0.4);
   const [errorMessage, setErrorMessage] = useState(null);
   const [voiceProfile, setVoiceProfile] = useState({ language: 'en', voice: 'eve' });
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [summaryStats, setSummaryStats] = useState(null);
+  const [sessionSeconds, setSessionSeconds] = useState(0);
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const workletNodeRef = useRef(null);
   const pcmPlayerRef = useRef(null);
+  const micAnalyserRef = useRef(null);
+  const sessionTimerRef = useRef(null);
+  const sessionSecondsRef = useRef(0);
+  const exercisesPracticedRef = useRef(new Set(['Diaphragmatic Breathing']));
+  const tipsCoveredRef = useRef([]);
+  const languageSwitchesCountRef = useRef(0);
+  const keyShiftsCountRef = useRef(0);
 
-  // Initialize PCM streaming audio player (AssemblyAI native 24 kHz)
+  // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
     pcmPlayerRef.current = new StreamingPCMPlayer(24000);
+    scaleEngine.onNoteChange((noteInfo) => {
+      setCurrentNote(noteInfo);
+    });
+
     return () => {
       pcmPlayerRef.current?.close();
+      scaleEngine.stop();
     };
   }, []);
 
@@ -64,6 +83,13 @@ export function useVoiceAgent() {
       const workletNode = new AudioWorkletNode(audioCtx, 'audio-recorder-processor');
       workletNodeRef.current = workletNode;
 
+      // Real-time Analyser for Microphone Frequency Spectrum Visualizer
+      const micAnalyser = audioCtx.createAnalyser();
+      micAnalyser.fftSize = 128;
+      micAnalyser.smoothingTimeConstant = 0.75;
+      source.connect(micAnalyser);
+      micAnalyserRef.current = micAnalyser;
+
       workletNode.port.onmessage = (event) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           // Stream raw base64 PCM16 audio via input.audio
@@ -87,6 +113,10 @@ export function useVoiceAgent() {
 
   // Stop microphone capture
   const stopMicrophone = () => {
+    if (micAnalyserRef.current) {
+      micAnalyserRef.current.disconnect();
+      micAnalyserRef.current = null;
+    }
     if (workletNodeRef.current) {
       workletNodeRef.current.disconnect();
       workletNodeRef.current = null;
@@ -133,21 +163,36 @@ export function useVoiceAgent() {
       const lang = parameters.language || 'en';
       const voice = parameters.voice || (lang === 'es' ? 'lola' : 'eve');
       setVoiceProfile({ language: lang, voice });
+      languageSwitchesCountRef.current += 1;
     } else if (name === 'show_vocal_tip') {
-      setActiveTip({
+      const tipObj = {
         tipType: parameters.tip_type || 'posture',
         title: parameters.title || 'Vocal Technique Tip',
         explanation: parameters.explanation || '',
         timestamp: new Date().toLocaleTimeString(),
-      });
+      };
+      setActiveTip(tipObj);
+      tipsCoveredRef.current.push(tipObj);
     } else if (name === 'adjust_music_playback') {
-      setPlaybackSettings((prev) => ({
-        pitchShift: parameters.pitch_shift !== undefined ? parameters.pitch_shift : prev.pitchShift,
-        speed: parameters.playback_speed !== undefined ? parameters.playback_speed : prev.speed,
-      }));
+      keyShiftsCountRef.current += 1;
+      setPlaybackSettings((prev) => {
+        const nextPitch = parameters.pitch_shift !== undefined ? parameters.pitch_shift : prev.pitchShift;
+        const nextSpeed = parameters.playback_speed !== undefined ? parameters.playback_speed : prev.speed;
+        scaleEngine.setPitchShift(nextPitch);
+        scaleEngine.setSpeed(nextSpeed);
+        return { pitchShift: nextPitch, speed: nextSpeed };
+      });
     } else if (name === 'select_exercise') {
       if (parameters.exercise_id) {
+        const exNames = {
+          warmup_breathing: 'Diaphragmatic Breathing',
+          warmup_lip_trill: 'Lip Trill Scale',
+          warmup_sirens: 'Vocal Sirens',
+          song_practice: 'Free Song Practice',
+        };
         setActiveExercise(parameters.exercise_id);
+        scaleEngine.setExercise(parameters.exercise_id);
+        exercisesPracticedRef.current.add(exNames[parameters.exercise_id] || parameters.exercise_id);
       }
     }
   }, []);
@@ -157,6 +202,22 @@ export function useVoiceAgent() {
     try {
       setStatus('connecting');
       setErrorMessage(null);
+      setIsSummaryOpen(false);
+
+      // Reset and start session metrics timer
+      sessionSecondsRef.current = 0;
+      setSessionSeconds(0);
+      exercisesPracticedRef.current = new Set(['Diaphragmatic Breathing']);
+      tipsCoveredRef.current = [];
+      languageSwitchesCountRef.current = 0;
+      keyShiftsCountRef.current = 0;
+
+      if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = setInterval(() => {
+        sessionSecondsRef.current += 1;
+        setSessionSeconds(sessionSecondsRef.current);
+      }, 1000);
+
       await pcmPlayerRef.current?.init();
 
       const ws = new WebSocket(WS_URL);
@@ -288,7 +349,43 @@ export function useVoiceAgent() {
     }
   }, [handleToolCall]);
 
-  // Disconnect session
+  // Toggle accompaniment playback
+  const toggleAccompaniment = useCallback(() => {
+    if (scaleEngine.isPlaying) {
+      scaleEngine.stop();
+      setIsPlayingAccompaniment(false);
+    } else {
+      scaleEngine.setPitchShift(playbackSettings.pitchShift);
+      scaleEngine.setSpeed(playbackSettings.speed);
+      scaleEngine.start(activeExercise);
+      setIsPlayingAccompaniment(true);
+    }
+  }, [activeExercise, playbackSettings]);
+
+  // Adjust volume for accompaniment track
+  const setAccompanimentVolume = useCallback((vol) => {
+    setAccompanimentVolumeState(vol);
+    scaleEngine.setVolume(vol);
+  }, []);
+
+  // Manually transpose pitch (+/- semitones)
+  const adjustPitchManually = useCallback((delta) => {
+    setPlaybackSettings((prev) => {
+      const newShift = Math.max(-6, Math.min(6, prev.pitchShift + delta));
+      scaleEngine.setPitchShift(newShift);
+      return { ...prev, pitchShift: newShift };
+    });
+  }, []);
+
+  // Manually adjust tempo speed factor
+  const adjustSpeedManually = useCallback((newSpeed) => {
+    setPlaybackSettings((prev) => {
+      scaleEngine.setSpeed(newSpeed);
+      return { ...prev, speed: newSpeed };
+    });
+  }, []);
+
+  // Disconnect session and generate workout report
   const disconnect = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -296,8 +393,37 @@ export function useVoiceAgent() {
     }
     stopMicrophone();
     pcmPlayerRef.current?.stopAll();
+    scaleEngine.stop();
+    setIsPlayingAccompaniment(false);
     setStatus('disconnected');
     setIsSpeaking(false);
+
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+
+    const mins = Math.floor(sessionSecondsRef.current / 60);
+    const secs = sessionSecondsRef.current % 60;
+    const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    setSummaryStats({
+      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
+      exercisesPracticed: Array.from(exercisesPracticedRef.current),
+      tipsCovered: [...tipsCoveredRef.current],
+      languageSwitches: languageSwitchesCountRef.current,
+      keyShiftsUsed: keyShiftsCountRef.current,
+      messageCount: conversation.length,
+    });
+    setIsSummaryOpen(true);
+  }, [conversation.length]);
+
+  const closeSummary = useCallback(() => {
+    setIsSummaryOpen(false);
+  }, []);
+
+  const openSummary = useCallback(() => {
+    setIsSummaryOpen(true);
   }, []);
 
   return {
@@ -313,6 +439,20 @@ export function useVoiceAgent() {
     setPlaybackSettings,
     activeExercise,
     setActiveExercise,
+    isPlayingAccompaniment,
+    toggleAccompaniment,
+    currentNote,
+    accompanimentVolume,
+    setAccompanimentVolume,
+    adjustPitchManually,
+    adjustSpeedManually,
+    getMicAnalyser: () => micAnalyserRef.current,
+    getPlayerAnalyser: () => pcmPlayerRef.current?.getAnalyser() || null,
+    isSummaryOpen,
+    summaryStats,
+    openSummary,
+    closeSummary,
+    sessionSeconds,
     errorMessage,
     voiceProfile,
     switchVoiceManual,

@@ -5,6 +5,8 @@ import { VoiceOrb } from './components/VoiceOrb';
 import { TipCard } from './components/TipCard';
 import { ExerciseSelector } from './components/ExerciseSelector';
 import { TranscriptView } from './components/TranscriptView';
+import { PitchMonitor } from './components/PitchMonitor';
+import { SessionSummaryModal } from './components/SessionSummaryModal';
 import { AlertTriangle, Sparkles, Info, Globe2 } from 'lucide-react';
 
 export function App() {
@@ -20,6 +22,19 @@ export function App() {
     playbackSettings,
     activeExercise,
     setActiveExercise,
+    isPlayingAccompaniment,
+    toggleAccompaniment,
+    currentNote,
+    accompanimentVolume,
+    setAccompanimentVolume,
+    adjustPitchManually,
+    adjustSpeedManually,
+    getMicAnalyser,
+    getPlayerAnalyser,
+    isSummaryOpen,
+    summaryStats,
+    closeSummary,
+    sessionSeconds,
     errorMessage,
     voiceProfile,
     switchVoiceManual,
@@ -43,7 +58,7 @@ export function App() {
         onConnect={connect}
         onDisconnect={disconnect}
         voiceProfile={voiceProfile}
-        onSwitchVoice={switchVoiceManual}
+        sessionSeconds={sessionSeconds}
       />
 
       {/* Error notification banner if any */}
@@ -70,6 +85,8 @@ export function App() {
             isListening={isListening}
             agentTranscript={agentTranscript}
             userTranscript={userTranscript}
+            getMicAnalyser={getMicAnalyser}
+            getPlayerAnalyser={getPlayerAnalyser}
           />
 
           {/* Prompt suggestions when connected */}
@@ -98,16 +115,30 @@ export function App() {
             {/* Vocal Technique Tip Card (Tool Call from AssemblyAI) */}
             <TipCard activeTip={activeTip} onClose={handleCloseTip} />
 
-            {/* Exercise Selector */}
+            {/* Exercise Selector with Accompaniment Controls */}
             <ExerciseSelector
               activeExercise={activeExercise}
               onSelectExercise={handleSelectExercise}
               playbackSettings={playbackSettings}
+              isPlayingAccompaniment={isPlayingAccompaniment}
+              onToggleAccompaniment={toggleAccompaniment}
+              currentNote={currentNote}
+              accompanimentVolume={accompanimentVolume}
+              onVolumeChange={setAccompanimentVolume}
+              onPitchAdjust={adjustPitchManually}
+              onSpeedAdjust={adjustSpeedManually}
             />
           </div>
 
-          {/* Right Column: Live Transcript & Session Insights (5 cols) */}
+          {/* Right Column: Live Pitch Monitor, Transcript & Session Insights (5 cols) */}
           <div className="lg:col-span-5 flex flex-col gap-5">
+            {/* Real-time Vocal Pitch & Tuning Gauge */}
+            <PitchMonitor
+              getMicAnalyser={getMicAnalyser}
+              isListening={isListening}
+              targetNote={currentNote}
+            />
+
             <TranscriptView conversation={conversation} />
 
             {/* Technology & Code-Switching info card */}
@@ -130,6 +161,17 @@ export function App() {
       <footer className="border-t border-slate-800/60 py-4 text-center text-xs text-slate-500">
         <p className="m-0">VoxFlow • AI Vocal Coach powered by AssemblyAI Voice Agent (lablab.ai)</p>
       </footer>
+
+      {/* Post-Session Performance & Workout Summary Modal */}
+      <SessionSummaryModal
+        isOpen={isSummaryOpen}
+        onClose={closeSummary}
+        stats={summaryStats}
+        onStartNewSession={() => {
+          closeSummary();
+          connect();
+        }}
+      />
     </div>
   );
 }
