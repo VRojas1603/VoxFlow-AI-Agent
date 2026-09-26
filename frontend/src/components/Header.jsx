@@ -1,9 +1,13 @@
 import React from 'react';
 import { Mic, Radio, Music, Sparkles, Languages } from 'lucide-react';
 
-export function Header({ status, onConnect, onDisconnect, voiceProfile, onSwitchVoice }) {
+export function Header({ status, onConnect, onDisconnect, voiceProfile, sessionSeconds = 0 }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
+
+  const mins = Math.floor(sessionSeconds / 60);
+  const secs = sessionSeconds % 60;
+  const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
@@ -28,6 +32,14 @@ export function Header({ status, onConnect, onDisconnect, voiceProfile, onSwitch
 
         {/* Status indicator & Voice profile & Connect Action */}
         <div className="flex items-center gap-3">
+          {/* Live Training Timer */}
+          {isConnected && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-950/40 border border-purple-500/30 text-xs text-purple-300 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-ping" />
+              <span>{durationFormatted}</span>
+            </div>
+          )}
+
           {/* Active Voice Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
             <Languages className="w-3.5 h-3.5 text-purple-400" />

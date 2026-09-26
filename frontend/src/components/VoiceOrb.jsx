@@ -1,16 +1,34 @@
 import React from 'react';
-import { Mic, Volume2, Sparkles, MessageSquare } from 'lucide-react';
+import { Mic, Volume2, Sparkles, MessageSquare, Activity } from 'lucide-react';
+import { AudioVisualizer } from './AudioVisualizer';
 
-export function VoiceOrb({ status, isSpeaking, isListening, agentTranscript, userTranscript }) {
+export function VoiceOrb({
+  status,
+  isSpeaking,
+  isListening,
+  agentTranscript,
+  userTranscript,
+  getMicAnalyser,
+  getPlayerAnalyser,
+}) {
   const isConnected = status === 'connected';
 
   return (
     <div className="flex flex-col items-center justify-center p-6 text-center">
-      {/* Central Visual Orb */}
-      <div className="relative flex items-center justify-center my-6">
-        {/* Glow rings */}
+      {/* Central Visual Orb with Real-time Canvas Spectrum Visualizer */}
+      <div className="relative flex items-center justify-center my-8 w-64 h-64">
+        {/* Real-time HTML5 Canvas Radial Audio Frequency Spectrum */}
+        <AudioVisualizer
+          getMicAnalyser={getMicAnalyser}
+          getPlayerAnalyser={getPlayerAnalyser}
+          isSpeaking={isSpeaking}
+          isListening={isListening}
+          isConnected={isConnected}
+        />
+
+        {/* Ambient Glow Aura */}
         <div
-          className={`absolute w-44 h-44 rounded-full blur-3xl transition-all duration-700 pointer-events-none ${
+          className={`absolute w-48 h-48 rounded-full blur-3xl transition-all duration-700 pointer-events-none ${
             isSpeaking
               ? 'bg-purple-600/40 scale-125 animate-pulse'
               : isListening
@@ -21,17 +39,7 @@ export function VoiceOrb({ status, isSpeaking, isListening, agentTranscript, use
           }`}
         />
 
-        {/* Dynamic Wave Ring when speaking */}
-        {isSpeaking && (
-          <div className="absolute w-36 h-36 rounded-full border-2 border-purple-400/40 animate-ping pointer-events-none" />
-        )}
-
-        {/* Dynamic Wave Ring when listening */}
-        {isListening && !isSpeaking && (
-          <div className="absolute w-36 h-36 rounded-full border border-cyan-400/30 animate-pulse pointer-events-none" />
-        )}
-
-        {/* Main Core Orb */}
+        {/* Main Core Interactive Orb */}
         <div
           className={`relative z-10 w-28 h-28 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 border ${
             isSpeaking
@@ -55,23 +63,24 @@ export function VoiceOrb({ status, isSpeaking, isListening, agentTranscript, use
         </div>
       </div>
 
-      {/* State label */}
-      <div className="mt-2 text-center">
+      {/* State & Real-time Spectrum Mode Label */}
+      <div className="mt-1 text-center flex items-center justify-center gap-2">
         <span
-          className={`inline-block px-3 py-1 rounded-full text-xs font-medium tracking-wide uppercase ${
+          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium tracking-wide uppercase ${
             isSpeaking
               ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
               : isListening
               ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
               : isConnected
-              ? 'bg-slate-800 text-slate-400'
+              ? 'bg-slate-800 text-slate-400 border border-slate-700/50'
               : 'bg-slate-900 text-slate-500'
           }`}
         >
+          {isListening && <Activity className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />}
           {isSpeaking
             ? 'Lyra is speaking (you can interrupt)'
             : isListening
-            ? 'Lyra is listening to you...'
+            ? 'Live Audio Spectrum Active • Listening to you...'
             : isConnected
             ? 'Standing by'
             : 'Click Start to connect'}
