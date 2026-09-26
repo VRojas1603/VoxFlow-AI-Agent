@@ -300,11 +300,14 @@ export function useVoiceAgent() {
           if (eventType === 'transcript.user' || (eventType === 'transcript' && message.role === 'user')) {
             const text = message.text || '';
             if (text) {
+              const isNoisePattern = /^(dun|la|brr|hum|na|bum|\.|\s)+$/i.test(text.trim());
               setUserTranscript(text);
-              setConversation((prev) => [
-                ...prev,
-                { role: 'user', text, time: new Date().toLocaleTimeString() }
-              ]);
+              if (!isNoisePattern) {
+                setConversation((prev) => [
+                  ...prev,
+                  { role: 'user', text, time: new Date().toLocaleTimeString() }
+                ]);
+              }
             }
             return;
           }
@@ -368,8 +371,22 @@ export function useVoiceAgent() {
     scaleEngine.setVolume(vol);
   }, []);
 
+  // Select exercise manually or via tool
+  const selectExerciseManual = useCallback((exerciseId) => {
+    const exNames = {
+      warmup_breathing: 'Diaphragmatic Breathing',
+      warmup_lip_trill: 'Lip Trill Scale',
+      warmup_sirens: 'Vocal Sirens',
+      song_practice: 'Free Song Practice',
+    };
+    setActiveExercise(exerciseId);
+    scaleEngine.setExercise(exerciseId);
+    exercisesPracticedRef.current.add(exNames[exerciseId] || exerciseId);
+  }, []);
+
   // Manually transpose pitch (+/- semitones)
   const adjustPitchManually = useCallback((delta) => {
+    keyShiftsCountRef.current += 1;
     setPlaybackSettings((prev) => {
       const newShift = Math.max(-6, Math.min(6, prev.pitchShift + delta));
       scaleEngine.setPitchShift(newShift);
@@ -379,6 +396,7 @@ export function useVoiceAgent() {
 
   // Manually adjust tempo speed factor
   const adjustSpeedManually = useCallback((newSpeed) => {
+    keyShiftsCountRef.current += 1;
     setPlaybackSettings((prev) => {
       scaleEngine.setSpeed(newSpeed);
       return { ...prev, speed: newSpeed };
@@ -438,7 +456,7 @@ export function useVoiceAgent() {
     playbackSettings,
     setPlaybackSettings,
     activeExercise,
-    setActiveExercise,
+    setActiveExercise: selectExerciseManual,
     isPlayingAccompaniment,
     toggleAccompaniment,
     currentNote,
