@@ -91,13 +91,26 @@ async def handle_agent_proxy(client_ws: WebSocket):
                         elif isinstance(message, str):
                             await client_ws.send_text(message)
 
-                            # Intercept Tool Call to dynamically switch voice between 'eve' and 'lola'
+                            # Intercept Tool Call to confirm execution to AssemblyAI and handle voice switches
                             try:
                                 event = json.loads(message)
                                 event_type = event.get("type") or event.get("event")
                                 if event_type in ("tool.call", "tool_call"):
                                     tool = event.get("tool") or event
                                     tool_name = tool.get("name") or tool.get("function", {}).get("name")
+                                    tool_call_id = tool.get("call_id") or tool.get("id") or event.get("call_id") or event.get("id")
+
+                                    # 1. Immediately acknowledge tool execution to AssemblyAI so it doesn't timeout
+                                    if tool_call_id:
+                                        tool_ack = {
+                                            "type": "tool.response",
+                                            "tool_call_id": tool_call_id,
+                                            "output": json.dumps({"status": "success", "executed": True})
+                                        }
+                                        await aai_ws.send(json.dumps(tool_ack))
+                                        logger.info(f"Acknowledged tool.call to AssemblyAI [tool={tool_name}, id={tool_call_id}]")
+
+                                    # 2. Dynamic voice profile switch if language tool was called
                                     if tool_name == "switch_language_voice":
                                         params = tool.get("parameters") or tool.get("arguments") or {}
                                         if isinstance(params, str):
@@ -111,7 +124,8 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                             }
                                         }
                                         await aai_ws.send(json.dumps(voice_update))
-                            except Exception:
+                            except Exception as ex:
+                                logger.warning(f"Error handling tool response: {ex}")
                                 pass
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
