@@ -121,7 +121,7 @@ export class ScaleEngine {
   }
 
   /**
-   * Play continuous glissando sweep for Vocal Sirens exercise.
+   * Play continuous glissando sweep for Vocal Sirens exercise with lowpass smoothing.
    */
   playGlissando(startMidi, endMidi, durationSec) {
     if (!this.audioCtx) this.init();
@@ -130,18 +130,25 @@ export class ScaleEngine {
     const now = this.audioCtx.currentTime;
 
     const osc = this.audioCtx.createOscillator();
+    const filter = this.audioCtx.createBiquadFilter();
     const gain = this.audioCtx.createGain();
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(startFreq, now);
     osc.frequency.exponentialRampToValueAtTime(endFreq, now + durationSec);
 
+    // Warm Low-Pass Filter at 650 Hz to eliminate piercing high harmonics
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(650, now);
+
+    // Gentle, comfortable volume gain envelope (0.15 peak)
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.5, now + 0.1);
-    gain.gain.setValueAtTime(0.5, now + durationSec - 0.1);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.15);
+    gain.gain.setValueAtTime(0.15, now + durationSec - 0.15);
     gain.gain.linearRampToValueAtTime(0.001, now + durationSec);
 
-    osc.connect(gain);
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(now);
