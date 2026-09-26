@@ -15,11 +15,19 @@ export class StreamingPCMPlayer {
     if (!this.audioCtx) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       this.audioCtx = new AudioContextClass({ sampleRate: this.sampleRate });
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 128;
+      this.analyser.smoothingTimeConstant = 0.8;
+      this.analyser.connect(this.audioCtx.destination);
     }
     if (this.audioCtx.state === 'suspended') {
       await this.audioCtx.resume();
     }
     this.nextStartTime = this.audioCtx.currentTime;
+  }
+
+  getAnalyser() {
+    return this.analyser;
   }
 
   /**
@@ -66,7 +74,7 @@ export class StreamingPCMPlayer {
 
     const source = this.audioCtx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(this.audioCtx.destination);
+    source.connect(this.analyser || this.audioCtx.destination);
 
     const currentTime = this.audioCtx.currentTime;
     if (this.nextStartTime < currentTime) {
