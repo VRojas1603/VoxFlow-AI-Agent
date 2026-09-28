@@ -116,6 +116,9 @@ def get_session_update_payload(voice: str = DEFAULT_VOICE_EN) -> dict:
             "system_prompt": SYSTEM_PROMPT,
             "greeting": DEFAULT_GREETING,
             "tools": VOICE_TOOLS,
+            "input": {
+                "transcription_mode": "min_latency"
+            },
             "output": {
                 "voice": voice
             }
