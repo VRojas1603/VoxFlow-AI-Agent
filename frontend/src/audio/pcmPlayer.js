@@ -105,7 +105,7 @@ export class StreamingPCMPlayer {
       try {
         source.stop();
         source.disconnect();
-      } catch (e) {
+      } catch {
         // Ignore if already stopped
       }
     }

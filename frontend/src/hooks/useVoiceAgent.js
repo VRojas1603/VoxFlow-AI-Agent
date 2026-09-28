@@ -62,6 +62,7 @@ export function useVoiceAgent() {
   const tipsCoveredRef = useRef([]);
   const languageSwitchesCountRef = useRef(0);
   const keyShiftsCountRef = useRef(0);
+  const speedChangesCountRef = useRef(0);
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
@@ -195,6 +196,7 @@ export function useVoiceAgent() {
       tipsCovered: [...tipsCoveredRef.current],
       languageSwitches: languageSwitchesCountRef.current,
       keyShiftsUsed: keyShiftsCountRef.current,
+      speedChangesUsed: speedChangesCountRef.current,
       messageCount: conversationRef.current.length,
     });
     setIsSummaryOpen(true);
@@ -207,7 +209,7 @@ export function useVoiceAgent() {
     if (typeof parameters === 'string') {
       try {
         parameters = JSON.parse(parameters);
-      } catch (e) {
+      } catch {
         console.warn('Could not parse tool parameters:', parameters);
       }
     }
@@ -230,7 +232,8 @@ export function useVoiceAgent() {
       setActiveTip(tipObj);
       tipsCoveredRef.current.push(tipObj);
     } else if (name === 'adjust_music_playback') {
-      keyShiftsCountRef.current += 1;
+      if (parameters.pitch_shift !== undefined) keyShiftsCountRef.current += 1;
+      if (parameters.playback_speed !== undefined) speedChangesCountRef.current += 1;
       setPlaybackSettings((prev) => {
         const nextPitch = parameters.pitch_shift !== undefined ? parameters.pitch_shift : prev.pitchShift;
         const nextSpeed = parameters.playback_speed !== undefined ? parameters.playback_speed : prev.speed;
@@ -259,6 +262,11 @@ export function useVoiceAgent() {
       setStatus('connecting');
       setErrorMessage(null);
       setIsSummaryOpen(false);
+      setConversation([]);
+      conversationRef.current = [];
+      setUserTranscript('');
+      setAgentTranscript('');
+      setActiveTip(null);
       pendingVoiceEndRef.current = false;
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
@@ -272,6 +280,7 @@ export function useVoiceAgent() {
       tipsCoveredRef.current = [];
       languageSwitchesCountRef.current = 0;
       keyShiftsCountRef.current = 0;
+      speedChangesCountRef.current = 0;
 
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
       sessionTimerRef.current = setInterval(() => {
@@ -284,11 +293,10 @@ export function useVoiceAgent() {
       const ws = new WebSocket(getAgentWebSocketUrl(selectedVoice));
       wsRef.current = ws;
 
-      ws.onopen = async () => {
+      ws.onopen = () => {
         console.log('Connected to Voice Agent proxy');
         sessionActiveRef.current = true;
         setStatus('connected');
-        await startMicrophone(ws);
       };
 
       ws.onmessage = async (event) => {
@@ -303,7 +311,17 @@ export function useVoiceAgent() {
           const message = JSON.parse(event.data);
           const eventType = message.type || message.event;
 
-          // 1. Error
+          // 1. Session configuration/runtime error
+          if (eventType === 'session.error') {
+            console.error('[AssemblyAI Session Error]:', message);
+            const code = message.code || message.error?.code;
+            const detail = message.message || message.error?.message || 'Voice session error';
+            setErrorMessage(`${code ? `${code}: ` : ''}${detail}`);
+            setStatus('error');
+            return;
+          }
+
+          // 2. General proxy/service error
           if (eventType === 'error') {
             console.error('[AssemblyAI Error]:', message);
             setErrorMessage(message.message || 'Voice service error');
@@ -311,7 +329,7 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 2. Incoming TTS audio chunk from agent (Base64)
+          // 3. Incoming TTS audio chunk from agent (Base64)
           if (eventType === 'reply.audio') {
             setIsSpeaking(true);
             const audioData = message.data || message.audio;
@@ -321,13 +339,13 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 3. Agent reply started
+          // 4. Agent reply started
           if (eventType === 'reply.started') {
             setIsSpeaking(true);
             return;
           }
 
-          // 4. Agent reply done (or barge-in interrupted)
+          // 5. Agent reply done (or barge-in interrupted)
           if (eventType === 'reply.done') {
             const wasInterrupted = message.status === 'interrupted' || message.interrupted;
             if (wasInterrupted) {
@@ -341,7 +359,7 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 5. Interruption event
+          // 6. Interruption event
           if (eventType === 'interruption' || message.interrupted) {
             console.log('[Barge-in]: Interruption detected');
             pcmPlayerRef.current?.stopAll();
@@ -349,7 +367,7 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 6. Agent transcript
+          // 7. Agent transcript
           if (eventType === 'transcript.agent' || (eventType === 'transcript' && message.role === 'agent')) {
             const text = message.text || '';
             if (text) {
@@ -366,7 +384,7 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 7. User transcript
+          // 8. User transcript
           if (eventType === 'transcript.user' || (eventType === 'transcript' && message.role === 'user')) {
             const text = message.text || '';
             if (text) {
@@ -386,13 +404,13 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 8. Partial user delta transcript
+          // 9. Partial user delta transcript
           if (eventType === 'transcript.user.delta') {
             setUserTranscript(message.text || message.delta || '');
             return;
           }
 
-          // 9. Tool Calling
+          // 10. Tool Calling
           if (eventType === 'tool.call' || eventType === 'tool_call') {
             handleToolCall(message.tool || message);
             return;
@@ -400,13 +418,14 @@ export function useVoiceAgent() {
 
           if (eventType === 'session.ready') {
             console.log('Voice Agent session ready for audio streaming');
+            await startMicrophone(ws);
             return;
           }
 
           if (eventType === 'session.ended') {
             finishSession();
           }
-        } catch (e) {
+        } catch {
           console.warn('Non-JSON message received:', event.data);
         }
       };
@@ -474,7 +493,7 @@ export function useVoiceAgent() {
 
   // Manually adjust tempo speed factor
   const adjustSpeedManually = useCallback((newSpeed) => {
-    keyShiftsCountRef.current += 1;
+    speedChangesCountRef.current += 1;
     setPlaybackSettings((prev) => {
       scaleEngine.setSpeed(newSpeed);
       return { ...prev, speed: newSpeed };
