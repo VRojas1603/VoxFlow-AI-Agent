@@ -20,6 +20,21 @@ def resolve_voice_config(requested_voice: str | None) -> tuple[str, str]:
     return voice, VOICE_LANGUAGES[voice]
 
 
+async def finish_tool_reply(
+    tool_coordinator: ToolCallCoordinator,
+    send_to_aai,
+    *,
+    pending_end_session: bool,
+    interrupted: bool,
+) -> bool:
+    """Finish tool calls and end billing only after a completed farewell reply."""
+    await tool_coordinator.finish_reply(interrupted=interrupted)
+    if pending_end_session and not interrupted:
+        await send_to_aai({"type": "session.end"})
+        logger.info("Sent session.end after completed farewell")
+    return False
+
+
 async def handle_agent_proxy(client_ws: WebSocket):
     """Establishes a bidirectional bridge between the web client and the AssemblyAI Voice Agent WebSocket with bilingual support."""
     await client_ws.accept()
@@ -60,6 +75,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
                     await aai_ws.send(message)
 
             tool_coordinator = ToolCallCoordinator(send_to_aai, logger=logger)
+            pending_end_session = False
 
             # Voice is immutable after this initial session.update.
             session_payload = get_session_update_payload(
@@ -97,6 +113,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             # Task: Forward stream from AssemblyAI to web client
             async def forward_aai_to_client():
+                nonlocal pending_end_session
                 try:
                     async for message in aai_ws:
                         if isinstance(message, bytes):
@@ -125,6 +142,8 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                             tool_name or "unknown",
                                             tool_arguments,
                                         )
+                                        if tool_name == "end_session":
+                                            pending_end_session = True
 
                             except Exception as ex:
                                 logger.warning(f"Error handling AssemblyAI event: {ex}")
@@ -133,8 +152,14 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
                             try:
                                 if event_type in ("reply.done", "reply_done"):
-                                    await tool_coordinator.finish_reply(
-                                        interrupted=(event.get("status") == "interrupted" or bool(event.get("interrupted"))),
+                                    pending_end_session = await finish_tool_reply(
+                                        tool_coordinator,
+                                        send_to_aai,
+                                        pending_end_session=pending_end_session,
+                                        interrupted=(
+                                            event.get("status") == "interrupted"
+                                            or bool(event.get("interrupted"))
+                                        ),
                                     )
                             except Exception as ex:
                                 logger.warning(f"Error coordinating AssemblyAI event: {ex}")

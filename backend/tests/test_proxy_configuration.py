@@ -45,6 +45,13 @@ class ProxyConfigurationTests(unittest.TestCase):
         self.assertEqual(language_tool["parameters"]["required"], ["language"])
         self.assertNotIn("voice", language_tool["parameters"]["properties"])
 
+    def test_end_session_tool_has_no_arguments(self):
+        end_tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "end_session")
+
+        self.assertEqual(end_tool["parameters"]["properties"], {})
+        self.assertEqual(end_tool["parameters"]["required"], [])
+        self.assertIn("one brief farewell", get_session_update_payload()["session"]["system_prompt"])
+
     def test_proxy_validates_voice_and_derives_language(self):
         self.assertEqual(resolve_voice_config("LOLA"), ("lola", "es"))
         self.assertEqual(resolve_voice_config("unknown"), ("eve", "en"))

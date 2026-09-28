@@ -40,7 +40,8 @@ Core Language & Code-Switching Rules:
 10. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
 11. Non-Word Vocalizations & Singing Practice:
    - Treat singing sounds, lip trill vibrations ("brrr"), and scale syllables ("dun dun", "la la") as vocal warm-up practice rather than text commands. Give encouraging feedback on pitch and breath support.
-12. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
+12. Session closure: When the user says goodbye or asks to end the session, say one brief farewell and invoke 'end_session' in the same turn. Do not continue coaching afterward.
+13. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
 """
 
 
@@ -124,6 +125,17 @@ VOICE_TOOLS = [
                 }
             },
             "required": ["exercise_id"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "end_session",
+        "description": "Ends the current vocal coaching session after the user says goodbye or asks to stop.",
+        "response_instructions": "Say one brief farewell before ending the session.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
         },
     },
 ]

@@ -55,6 +55,9 @@ export function useVoiceAgent() {
   const micAnalyserRef = useRef(null);
   const sessionTimerRef = useRef(null);
   const sessionSecondsRef = useRef(0);
+  const sessionActiveRef = useRef(false);
+  const pendingVoiceEndRef = useRef(false);
+  const conversationRef = useRef([]);
   const exercisesPracticedRef = useRef(new Set(['Diaphragmatic Breathing']));
   const tipsCoveredRef = useRef([]);
   const languageSwitchesCountRef = useRef(0);
@@ -125,7 +128,7 @@ export function useVoiceAgent() {
   };
 
   // Stop microphone capture
-  const stopMicrophone = () => {
+  const stopMicrophone = useCallback(() => {
     if (micAnalyserRef.current) {
       micAnalyserRef.current.disconnect();
       micAnalyserRef.current = null;
@@ -143,7 +146,7 @@ export function useVoiceAgent() {
       audioCtxRef.current = null;
     }
     setIsListening(false);
-  };
+  }, []);
 
   const selectVoice = useCallback((voiceId) => {
     setSelectedVoice(voiceId);
@@ -152,6 +155,50 @@ export function useVoiceAgent() {
       voice: voiceId,
     });
   }, []);
+
+  const finishSession = useCallback(({ closeSocket = true } = {}) => {
+    const hadActiveSession = sessionActiveRef.current;
+    sessionActiveRef.current = false;
+    pendingVoiceEndRef.current = false;
+
+    const socket = wsRef.current;
+    if (closeSocket && socket) {
+      wsRef.current = null;
+      socket.close();
+    }
+
+    stopMicrophone();
+    pcmPlayerRef.current?.stopAll();
+    scaleEngine.stop();
+    setIsPlayingAccompaniment(false);
+    setStatus('disconnected');
+    setIsSpeaking(false);
+    setVoiceProfile({
+      language: getVoiceLanguage(selectedVoice),
+      voice: selectedVoice,
+    });
+
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+
+    if (!hadActiveSession) return;
+
+    const mins = Math.floor(sessionSecondsRef.current / 60);
+    const secs = sessionSecondsRef.current % 60;
+    const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    setSummaryStats({
+      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
+      exercisesPracticed: Array.from(exercisesPracticedRef.current),
+      tipsCovered: [...tipsCoveredRef.current],
+      languageSwitches: languageSwitchesCountRef.current,
+      keyShiftsUsed: keyShiftsCountRef.current,
+      messageCount: conversationRef.current.length,
+    });
+    setIsSummaryOpen(true);
+  }, [selectedVoice, stopMicrophone]);
 
   // Process Tool Calls (AssemblyAI Voice Agent Function Calling)
   const handleToolCall = useCallback((toolData) => {
@@ -171,6 +218,8 @@ export function useVoiceAgent() {
       const lang = parameters.language || 'en';
       setVoiceProfile((current) => ({ ...current, language: lang }));
       languageSwitchesCountRef.current += 1;
+    } else if (name === 'end_session') {
+      pendingVoiceEndRef.current = true;
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
         tipType: parameters.tip_type || 'posture',
@@ -210,6 +259,7 @@ export function useVoiceAgent() {
       setStatus('connecting');
       setErrorMessage(null);
       setIsSummaryOpen(false);
+      pendingVoiceEndRef.current = false;
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
         voice: selectedVoice,
@@ -236,6 +286,7 @@ export function useVoiceAgent() {
 
       ws.onopen = async () => {
         console.log('Connected to Voice Agent proxy');
+        sessionActiveRef.current = true;
         setStatus('connected');
         await startMicrophone(ws);
       };
@@ -278,11 +329,15 @@ export function useVoiceAgent() {
 
           // 4. Agent reply done (or barge-in interrupted)
           if (eventType === 'reply.done') {
-            if (message.status === 'interrupted' || message.interrupted) {
+            const wasInterrupted = message.status === 'interrupted' || message.interrupted;
+            if (wasInterrupted) {
               console.log('[Barge-in]: Agent interrupted by user');
               pcmPlayerRef.current?.stopAll();
             }
             setIsSpeaking(false);
+            if (pendingVoiceEndRef.current && wasInterrupted) {
+              pendingVoiceEndRef.current = false;
+            }
             return;
           }
 
@@ -299,10 +354,14 @@ export function useVoiceAgent() {
             const text = message.text || '';
             if (text) {
               setAgentTranscript(text);
-              setConversation((prev) => [
-                ...prev,
-                { role: 'agent', text, time: new Date().toLocaleTimeString() }
-              ]);
+              setConversation((prev) => {
+                const next = [
+                  ...prev,
+                  { role: 'agent', text, time: new Date().toLocaleTimeString() }
+                ];
+                conversationRef.current = next;
+                return next;
+              });
             }
             return;
           }
@@ -314,10 +373,14 @@ export function useVoiceAgent() {
               const isNoisePattern = /^(dun|la|brr|hum|na|bum|\.|\s)+$/i.test(text.trim());
               setUserTranscript(text);
               if (!isNoisePattern) {
-                setConversation((prev) => [
-                  ...prev,
-                  { role: 'user', text, time: new Date().toLocaleTimeString() }
-                ]);
+                setConversation((prev) => {
+                  const next = [
+                    ...prev,
+                    { role: 'user', text, time: new Date().toLocaleTimeString() }
+                  ];
+                  conversationRef.current = next;
+                  return next;
+                });
               }
             }
             return;
@@ -337,6 +400,11 @@ export function useVoiceAgent() {
 
           if (eventType === 'session.ready') {
             console.log('Voice Agent session ready for audio streaming');
+            return;
+          }
+
+          if (eventType === 'session.ended') {
+            finishSession();
           }
         } catch (e) {
           console.warn('Non-JSON message received:', event.data);
@@ -351,21 +419,16 @@ export function useVoiceAgent() {
 
       ws.onclose = () => {
         console.log('WebSocket closed');
-        setStatus('disconnected');
-        stopMicrophone();
-        pcmPlayerRef.current?.stopAll();
-        setIsSpeaking(false);
-        setVoiceProfile({
-          language: getVoiceLanguage(selectedVoice),
-          voice: selectedVoice,
-        });
+        if (wsRef.current && wsRef.current !== ws) return;
+        if (wsRef.current === ws) wsRef.current = null;
+        finishSession({ closeSocket: false });
       };
     } catch (err) {
       console.error('Initialization error:', err);
       setStatus('error');
       setErrorMessage(err.message);
     }
-  }, [handleToolCall, selectedVoice]);
+  }, [finishSession, handleToolCall, selectedVoice]);
 
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
@@ -420,36 +483,8 @@ export function useVoiceAgent() {
 
   // Disconnect session and generate workout report
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    stopMicrophone();
-    pcmPlayerRef.current?.stopAll();
-    scaleEngine.stop();
-    setIsPlayingAccompaniment(false);
-    setStatus('disconnected');
-    setIsSpeaking(false);
-
-    if (sessionTimerRef.current) {
-      clearInterval(sessionTimerRef.current);
-      sessionTimerRef.current = null;
-    }
-
-    const mins = Math.floor(sessionSecondsRef.current / 60);
-    const secs = sessionSecondsRef.current % 60;
-    const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-
-    setSummaryStats({
-      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
-      exercisesPracticed: Array.from(exercisesPracticedRef.current),
-      tipsCovered: [...tipsCoveredRef.current],
-      languageSwitches: languageSwitchesCountRef.current,
-      keyShiftsUsed: keyShiftsCountRef.current,
-      messageCount: conversation.length,
-    });
-    setIsSummaryOpen(true);
-  }, [conversation.length]);
+    finishSession();
+  }, [finishSession]);
 
   const closeSummary = useCallback(() => {
     setIsSummaryOpen(false);
