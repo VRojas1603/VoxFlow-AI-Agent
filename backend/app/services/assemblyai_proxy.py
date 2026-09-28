@@ -5,15 +5,28 @@ from fastapi import WebSocket, WebSocketDisconnect
 import websockets
 
 from app.core.config import settings
-from app.core.prompt import get_session_update_payload, DEFAULT_VOICE_EN
+from app.core.prompt import DEFAULT_VOICE_EN, VOICE_LANGUAGES, get_session_update_payload
 from app.services.tool_coordinator import ToolCallCoordinator
 
 logger = logging.getLogger("voice_agent_proxy")
 
 
+def resolve_voice_config(requested_voice: str | None) -> tuple[str, str]:
+    """Validate the pre-session voice and return its linked initial language."""
+    voice = (requested_voice or DEFAULT_VOICE_EN).strip().lower()
+    if voice not in VOICE_LANGUAGES:
+        logger.warning("Unsupported voice '%s'; using %s", voice, DEFAULT_VOICE_EN)
+        voice = DEFAULT_VOICE_EN
+    return voice, VOICE_LANGUAGES[voice]
+
+
 async def handle_agent_proxy(client_ws: WebSocket):
     """Establishes a bidirectional bridge between the web client and the AssemblyAI Voice Agent WebSocket with bilingual support."""
     await client_ws.accept()
+
+    selected_voice, initial_language = resolve_voice_config(
+        client_ws.query_params.get("voice")
+    )
 
     api_key = settings.ASSEMBLYAI_API_KEY.strip()
     if not api_key or api_key == "tu_assemblyai_api_key_aqui":
@@ -48,10 +61,17 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             tool_coordinator = ToolCallCoordinator(send_to_aai, logger=logger)
 
-            # Send initial agent configuration (English default with Eve voice)
-            session_payload = get_session_update_payload(voice=DEFAULT_VOICE_EN)
+            # Voice is immutable after this initial session.update.
+            session_payload = get_session_update_payload(
+                voice=selected_voice,
+                language=initial_language,
+            )
             await send_to_aai(session_payload)
-            logger.info("Default English session.update payload sent to AssemblyAI.")
+            logger.info(
+                "Initial session.update sent [voice=%s, language=%s]",
+                selected_voice,
+                initial_language,
+            )
 
             # Task: Forward stream from web client to AssemblyAI
             async def forward_client_to_aai():
@@ -63,24 +83,6 @@ async def handle_agent_proxy(client_ws: WebSocket):
                         if "bytes" in data and data["bytes"]:
                             await send_to_aai(data["bytes"])
                         elif "text" in data and data["text"]:
-                            # Check if the client requested an explicit voice/language switch.
-                            try:
-                                ctrl = json.loads(data["text"])
-                            except json.JSONDecodeError:
-                                ctrl = None
-
-                            if isinstance(ctrl, dict) and ctrl.get("type") == "change_voice":
-                                new_voice = ctrl.get("voice", "lola")
-                                logger.info(f"Client requested manual voice change to {new_voice}")
-                                update_msg = {
-                                    "type": "session.update",
-                                    "session": {
-                                        "output": {"voice": new_voice}
-                                    }
-                                }
-                                await send_to_aai(update_msg)
-                                continue
-
                             await send_to_aai(data["text"])
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
@@ -123,21 +125,6 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                             tool_name or "unknown",
                                             tool_arguments,
                                         )
-
-                                    # Dynamic voice handling remains unchanged until the language/voice phase.
-                                    if tool_name == "switch_language_voice":
-                                        params = tool.get("parameters") or tool.get("arguments") or {}
-                                        if isinstance(params, str):
-                                            params = json.loads(params)
-                                        target_voice = params.get("voice") or ("lola" if params.get("language") == "es" else "eve")
-                                        logger.info(f"Tool triggered voice switch to: {target_voice}")
-                                        voice_update = {
-                                            "type": "session.update",
-                                            "session": {
-                                                "output": {"voice": target_voice}
-                                            }
-                                        }
-                                        await send_to_aai(voice_update)
 
                             except Exception as ex:
                                 logger.warning(f"Error handling AssemblyAI event: {ex}")

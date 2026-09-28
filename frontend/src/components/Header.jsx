@@ -1,9 +1,20 @@
 import React from 'react';
 import { Mic, Radio, Music, Sparkles, Languages } from 'lucide-react';
+import { VoiceSelector } from './VoiceSelector';
+import { getVoice } from '../data/voices';
 
-export function Header({ status, onConnect, onDisconnect, voiceProfile, sessionSeconds = 0 }) {
+export function Header({
+  status,
+  onConnect,
+  onDisconnect,
+  selectedVoice,
+  onVoiceChange,
+  voiceProfile,
+  sessionSeconds = 0,
+}) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
+  const activeVoice = getVoice(voiceProfile?.voice);
 
   const mins = Math.floor(sessionSeconds / 60);
   const secs = sessionSeconds % 60;
@@ -11,7 +22,7 @@ export function Header({ status, onConnect, onDisconnect, voiceProfile, sessionS
 
   return (
     <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-      <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+      <div className="max-w-6xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-4">
         {/* Brand */}
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-amber-400 p-0.5 shadow-lg shadow-purple-500/20">
@@ -31,7 +42,11 @@ export function Header({ status, onConnect, onDisconnect, voiceProfile, sessionS
         </div>
 
         {/* Status indicator & Voice profile & Connect Action */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {status === 'disconnected' && (
+            <VoiceSelector value={selectedVoice} onChange={onVoiceChange} />
+          )}
+
           {/* Live Training Timer */}
           {isConnected && (
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-950/40 border border-purple-500/30 text-xs text-purple-300 font-mono">
@@ -45,7 +60,7 @@ export function Header({ status, onConnect, onDisconnect, voiceProfile, sessionS
             <Languages className="w-3.5 h-3.5 text-purple-400" />
             <span>Voice:</span>
             <span className="font-semibold text-white capitalize">
-              {voiceProfile?.voice === 'lola' ? '🇪🇸 Lola (ES)' : '🇺🇸 Eve (EN)'}
+              {activeVoice.flag} {activeVoice.name} · {voiceProfile?.language?.toUpperCase()}
             </span>
           </div>
 

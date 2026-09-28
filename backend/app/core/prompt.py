@@ -1,56 +1,77 @@
-"""Configuration for System Prompt, Greeting, Tools, and Bilingual Code-Switching for AssemblyAI Voice Agent."""
+"""Session prompt, greetings, tools, and supported AssemblyAI voices."""
 
-SYSTEM_PROMPT = """You are 'Lyra', a professional, inspiring, and proactive vocal coach and singing pedagogy expert. Your mission is to prepare the user's voice for singing, prevent vocal strain/fatigue, and teach practical vocal techniques.
+DEFAULT_VOICE_EN = "eve"
+
+VOICE_LANGUAGES = {
+    "alba": "en",
+    "eve": "en",
+    "george": "en",
+    "jane": "en",
+    "jean": "en",
+    "mary": "en",
+    "michael": "en",
+    "anna": "en",
+    "charles": "en",
+    "paul": "en",
+    "vera": "en",
+    "lola": "es",
+}
+
+GREETINGS = {
+    "en": "Hello! I'm Lyra, your vocal coach today. Ready to warm up your voice, or would you like to jump straight into practicing a song?",
+    "es": "¡Hola! Soy Lyra, tu coach vocal hoy. ¿Listo para calentar tu voz o prefieres practicar directamente una canción?",
+}
+
+SYSTEM_PROMPT_TEMPLATE = """You are 'Lyra', a professional, inspiring, and proactive vocal coach and singing pedagogy expert. Your mission is to prepare the user's voice for singing, prevent vocal strain/fatigue, and teach practical vocal techniques.
 
 Core Language & Code-Switching Rules:
-1. Default Language is English. Start all sessions and initial guidance in English.
+1. The default language is __DEFAULT_LANGUAGE__. Start the session and initial guidance in that language.
 2. Bilingual & Code-Switching Mastery: You fluently understand both English and Spanish, as well as code-switching (Spanglish or mixed phrases).
-3. If the user speaks in Spanish, asks in Spanish, or sings Spanish lyrics:
-   - Reply immediately and naturally in fluent Spanish.
-   - You MUST invoke the tool 'switch_language_voice' with {"language": "es", "voice": "lola"} so the voice output automatically switches to the Spanish voice 'lola'.
-4. If the user speaks in English again:
-   - Reply in English.
-   - You MUST invoke the tool 'switch_language_voice' with {"language": "en", "voice": "eve"}.
-5. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
-6. Proactive Leadership & Immediate Action:
+3. Always reply naturally in the language the user is currently speaking. If the user changes between English and Spanish, follow that change immediately.
+4. When the response language changes, invoke 'switch_language' with {"language": "en"} or {"language": "es"} in the same turn. This tool only updates the UI badge and session metric; never try to change the configured voice.
+5. The voice selected before the session remains fixed. Continue in the requested language even when the selected voice has a foreign accent.
+6. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
+7. Proactive Leadership & Immediate Action:
    - Act as an energetic, proactive coach leading the session.
    - When the user asks to change speed, adjust pitch, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('adjust_music_playback', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN using sensible default values (e.g., playback_speed=0.85 or pitch_shift=-2).
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
-7. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
-8. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
-9. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
-10. Non-Word Vocalizations & Singing Practice:
+8. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
+9. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
+10. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
+11. Non-Word Vocalizations & Singing Practice:
    - Treat singing sounds, lip trill vibrations ("brrr"), and scale syllables ("dun dun", "la la") as vocal warm-up practice rather than text commands. Give encouraging feedback on pitch and breath support.
-11. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
+12. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
 """
 
-DEFAULT_GREETING = "Hello! I'm Lyra, your vocal coach today. Ready to warm up your voice, or would you like to jump straight into practicing a song?"
 
-DEFAULT_VOICE_EN = "eve"
-DEFAULT_VOICE_ES = "lola"
+def get_system_prompt(language: str) -> str:
+    """Build the prompt with the language selected before the session."""
+    if language not in GREETINGS:
+        raise ValueError(f"Unsupported language: {language}")
+    language_name = "Spanish" if language == "es" else "English"
+    return SYSTEM_PROMPT_TEMPLATE.replace("__DEFAULT_LANGUAGE__", language_name)
+
+
+SYSTEM_PROMPT = get_system_prompt("en")
+DEFAULT_GREETING = GREETINGS["en"]
 
 VOICE_TOOLS = [
     {
         "type": "function",
-        "name": "switch_language_voice",
-        "description": "Switches the active voice and language between English ('eve') and Spanish ('lola') based on user speech.",
-        "response_instructions": "Confirm the language change in one short sentence using the selected language.",
+        "name": "switch_language",
+        "description": "Updates the interface language badge when the conversation changes between English and Spanish. It does not change the configured voice.",
+        "response_instructions": "Continue naturally in the selected language without mentioning the interface update.",
         "parameters": {
-          "type": "object",
-          "properties": {
-            "language": {
-              "type": "string",
-              "enum": ["en", "es"],
-              "description": "Language code ('en' for English, 'es' for Spanish)"
+            "type": "object",
+            "properties": {
+                "language": {
+                    "type": "string",
+                    "enum": ["en", "es"],
+                    "description": "Current response language ('en' for English, 'es' for Spanish)",
+                }
             },
-            "voice": {
-              "type": "string",
-              "enum": ["eve", "lola", "alba"],
-              "description": "Voice profile name ('eve' for English, 'lola' for Spanish)"
-            }
-          },
-          "required": ["language", "voice"]
-        }
+            "required": ["language"],
+        },
     },
     {
         "type": "function",
@@ -58,17 +79,17 @@ VOICE_TOOLS = [
         "description": "Displays an educational visual card of vocal technique on the user's screen.",
         "response_instructions": "Explain the displayed technique aloud in one short sentence.",
         "parameters": {
-          "type": "object",
-          "properties": {
-            "tip_type": {
-              "type": "string",
-              "enum": ["diaphragm_breath", "lip_trill", "head_voice", "posture", "vocal_siren"]
+            "type": "object",
+            "properties": {
+                "tip_type": {
+                    "type": "string",
+                    "enum": ["diaphragm_breath", "lip_trill", "head_voice", "posture", "vocal_siren"],
+                },
+                "title": {"type": "string", "description": "Short title of the technique"},
+                "explanation": {"type": "string", "description": "1-2 sentence explanation of how to execute the technique"},
             },
-            "title": { "type": "string", "description": "Short title of the technique" },
-            "explanation": { "type": "string", "description": "1-2 sentence explanation of how to execute the technique" }
-          },
-          "required": ["tip_type", "title", "explanation"]
-        }
+            "required": ["tip_type", "title", "explanation"],
+        },
     },
     {
         "type": "function",
@@ -76,18 +97,18 @@ VOICE_TOOLS = [
         "description": "Adjusts the tempo or key/pitch of the backing track.",
         "response_instructions": "Confirm the playback change in one short sentence.",
         "parameters": {
-          "type": "object",
-          "properties": {
-            "pitch_shift": { 
-                "type": "integer", 
-                "description": "Number of semitones to transpose (-3 to +3)" 
+            "type": "object",
+            "properties": {
+                "pitch_shift": {
+                    "type": "integer",
+                    "description": "Number of semitones to transpose (-3 to +3)",
+                },
+                "playback_speed": {
+                    "type": "number",
+                    "description": "Playback speed factor (e.g. 0.85 to 1.15)",
+                },
             },
-            "playback_speed": { 
-                "type": "number", 
-                "description": "Playback speed factor (e.g. 0.85 to 1.15)" 
-            }
-          }
-        }
+        },
     },
     {
         "type": "function",
@@ -95,32 +116,47 @@ VOICE_TOOLS = [
         "description": "Switches the active warm-up exercise on the user interface.",
         "response_instructions": "Confirm the selected exercise in one short sentence.",
         "parameters": {
-          "type": "object",
-          "properties": {
-            "exercise_id": {
-              "type": "string",
-              "enum": ["warmup_breathing", "warmup_lip_trill", "warmup_sirens", "song_practice"]
-            }
-          },
-          "required": ["exercise_id"]
-        }
-    }
+            "type": "object",
+            "properties": {
+                "exercise_id": {
+                    "type": "string",
+                    "enum": ["warmup_breathing", "warmup_lip_trill", "warmup_sirens", "song_practice"],
+                }
+            },
+            "required": ["exercise_id"],
+        },
+    },
 ]
 
 
-def get_session_update_payload(voice: str = DEFAULT_VOICE_EN) -> dict:
-    """Generates the JSON session.update payload to initialize or update the Voice Agent."""
+def get_session_update_payload(
+    voice: str = DEFAULT_VOICE_EN,
+    language: str | None = None,
+) -> dict:
+    """Build the initial session.update with an immutable voice and linked language."""
+    if voice not in VOICE_LANGUAGES:
+        raise ValueError(f"Unsupported voice: {voice}")
+
+    linked_language = VOICE_LANGUAGES[voice]
+    initial_language = language or linked_language
+    if initial_language not in GREETINGS:
+        raise ValueError(f"Unsupported language: {initial_language}")
+    if initial_language != linked_language:
+        raise ValueError(
+            f"Voice '{voice}' must start in language '{linked_language}'"
+        )
+
     return {
         "type": "session.update",
         "session": {
-            "system_prompt": SYSTEM_PROMPT,
-            "greeting": DEFAULT_GREETING,
+            "system_prompt": get_system_prompt(initial_language),
+            "greeting": GREETINGS[initial_language],
             "tools": VOICE_TOOLS,
             "input": {
-                "transcription_mode": "min_latency"
+                "transcription_mode": "min_latency",
             },
             "output": {
-                "voice": voice
-            }
-        }
+                "voice": voice,
+            },
+        },
     }

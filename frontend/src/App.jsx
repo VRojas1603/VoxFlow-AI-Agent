@@ -36,8 +36,9 @@ export function App() {
     closeSummary,
     sessionSeconds,
     errorMessage,
+    selectedVoice,
+    selectVoice,
     voiceProfile,
-    switchVoiceManual,
     connect,
     disconnect,
   } = useVoiceAgent();
@@ -57,6 +58,8 @@ export function App() {
         status={status}
         onConnect={connect}
         onDisconnect={disconnect}
+        selectedVoice={selectedVoice}
+        onVoiceChange={selectVoice}
         voiceProfile={voiceProfile}
         sessionSeconds={sessionSeconds}
       />
@@ -149,7 +152,7 @@ export function App() {
                   AssemblyAI Bilingual & Code-Switching Voice Agent
                 </span>
                 <p className="m-0 leading-relaxed">
-                  Defaults to English with voice <strong>Eve</strong>. When Spanish or mixed language is detected, the agent seamlessly responds in Spanish and activates AssemblyAI's native Spanish voice <strong>Lola</strong>. Full support for <strong>barge-in</strong> interruptions and voice-driven <strong>tool calling</strong>.
+                  Choose the session voice before connecting; that voice remains fixed while Lyra follows your spoken language in English, Spanish, or mixed conversation. Full support for <strong>barge-in</strong> interruptions and voice-driven <strong>tool calling</strong>.
                 </p>
               </div>
             </div>

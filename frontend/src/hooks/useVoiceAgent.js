@@ -1,8 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
 import { scaleEngine } from '../audio/scaleEngine';
+import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
+
+function getAgentWebSocketUrl(voice) {
+  const url = new URL(WS_URL, window.location.href);
+  if (url.protocol === 'http:') url.protocol = 'ws:';
+  if (url.protocol === 'https:') url.protocol = 'wss:';
+  url.searchParams.set('voice', voice);
+  return url.toString();
+}
 
 // Helper to convert ArrayBuffer (16-bit PCM) to Base64
 function arrayBufferToBase64(buffer) {
@@ -29,7 +38,11 @@ export function useVoiceAgent() {
   const [currentNote, setCurrentNote] = useState(null);
   const [accompanimentVolume, setAccompanimentVolumeState] = useState(0.4);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [voiceProfile, setVoiceProfile] = useState({ language: 'en', voice: 'eve' });
+  const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
+  const [voiceProfile, setVoiceProfile] = useState({
+    language: getVoiceLanguage(DEFAULT_VOICE_ID),
+    voice: DEFAULT_VOICE_ID,
+  });
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [summaryStats, setSummaryStats] = useState(null);
   const [sessionSeconds, setSessionSeconds] = useState(0);
@@ -132,17 +145,12 @@ export function useVoiceAgent() {
     setIsListening(false);
   };
 
-  // Switch voice dynamically
-  const switchVoiceManual = useCallback((lang, voiceName) => {
-    const targetVoice = voiceName || (lang === 'es' ? 'lola' : 'eve');
-    setVoiceProfile({ language: lang, voice: targetVoice });
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'change_voice',
-        voice: targetVoice,
-        language: lang,
-      }));
-    }
+  const selectVoice = useCallback((voiceId) => {
+    setSelectedVoice(voiceId);
+    setVoiceProfile({
+      language: getVoiceLanguage(voiceId),
+      voice: voiceId,
+    });
   }, []);
 
   // Process Tool Calls (AssemblyAI Voice Agent Function Calling)
@@ -159,10 +167,9 @@ export function useVoiceAgent() {
 
     console.log(`[Tool Call Received]: ${name}`, parameters);
 
-    if (name === 'switch_language_voice') {
+    if (name === 'switch_language') {
       const lang = parameters.language || 'en';
-      const voice = parameters.voice || (lang === 'es' ? 'lola' : 'eve');
-      setVoiceProfile({ language: lang, voice });
+      setVoiceProfile((current) => ({ ...current, language: lang }));
       languageSwitchesCountRef.current += 1;
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
@@ -203,6 +210,10 @@ export function useVoiceAgent() {
       setStatus('connecting');
       setErrorMessage(null);
       setIsSummaryOpen(false);
+      setVoiceProfile({
+        language: getVoiceLanguage(selectedVoice),
+        voice: selectedVoice,
+      });
 
       // Reset and start session metrics timer
       sessionSecondsRef.current = 0;
@@ -220,7 +231,7 @@ export function useVoiceAgent() {
 
       await pcmPlayerRef.current?.init();
 
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(getAgentWebSocketUrl(selectedVoice));
       wsRef.current = ws;
 
       ws.onopen = async () => {
@@ -344,13 +355,17 @@ export function useVoiceAgent() {
         stopMicrophone();
         pcmPlayerRef.current?.stopAll();
         setIsSpeaking(false);
+        setVoiceProfile({
+          language: getVoiceLanguage(selectedVoice),
+          voice: selectedVoice,
+        });
       };
     } catch (err) {
       console.error('Initialization error:', err);
       setStatus('error');
       setErrorMessage(err.message);
     }
-  }, [handleToolCall]);
+  }, [handleToolCall, selectedVoice]);
 
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
@@ -472,8 +487,9 @@ export function useVoiceAgent() {
     closeSummary,
     sessionSeconds,
     errorMessage,
+    selectedVoice,
+    selectVoice,
     voiceProfile,
-    switchVoiceManual,
     connect,
     disconnect,
   };
