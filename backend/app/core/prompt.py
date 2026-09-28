@@ -17,9 +17,11 @@ Core Language & Code-Switching Rules:
    - When the user asks to change speed, adjust pitch, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('adjust_music_playback', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN using sensible default values (e.g., playback_speed=0.85 or pitch_shift=-2).
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
 7. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
-8. Non-Word Vocalizations & Singing Practice:
+8. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
+9. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
+10. Non-Word Vocalizations & Singing Practice:
    - Treat singing sounds, lip trill vibrations ("brrr"), and scale syllables ("dun dun", "la la") as vocal warm-up practice rather than text commands. Give encouraging feedback on pitch and breath support.
-9. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
+11. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
 """
 
 DEFAULT_GREETING = "Hello! I'm Lyra, your vocal coach today. Ready to warm up your voice, or would you like to jump straight into practicing a song?"
@@ -32,6 +34,7 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "switch_language_voice",
         "description": "Switches the active voice and language between English ('eve') and Spanish ('lola') based on user speech.",
+        "response_instructions": "Confirm the language change in one short sentence using the selected language.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -53,6 +56,7 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "show_vocal_tip",
         "description": "Displays an educational visual card of vocal technique on the user's screen.",
+        "response_instructions": "Explain the displayed technique aloud in one short sentence.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -70,6 +74,7 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "adjust_music_playback",
         "description": "Adjusts the tempo or key/pitch of the backing track.",
+        "response_instructions": "Confirm the playback change in one short sentence.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -88,6 +93,7 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "select_exercise",
         "description": "Switches the active warm-up exercise on the user interface.",
+        "response_instructions": "Confirm the selected exercise in one short sentence.",
         "parameters": {
           "type": "object",
           "properties": {
