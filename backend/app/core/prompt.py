@@ -61,7 +61,10 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "switch_language",
         "description": "Updates the interface language badge when the conversation changes between English and Spanish. It does not change the configured voice.",
-        "response_instructions": "Continue naturally in the selected language without mentioning the interface update.",
+        "response_instructions": {
+            "success": "Continue naturally in the selected language without mentioning the interface update.",
+            "error": "Continue in the user's current language without claiming the interface was updated.",
+        },
         "parameters": {
             "type": "object",
             "properties": {
@@ -78,7 +81,10 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "show_vocal_tip",
         "description": "Displays an educational visual card of vocal technique on the user's screen.",
-        "response_instructions": "Explain the displayed technique aloud in one short sentence.",
+        "response_instructions": {
+            "success": "Explain the displayed technique aloud in one short sentence.",
+            "error": "Explain the technique aloud without claiming that a visual guide was displayed.",
+        },
         "parameters": {
             "type": "object",
             "properties": {
@@ -96,7 +102,10 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "adjust_music_playback",
         "description": "Adjusts the tempo or key/pitch of the backing track.",
-        "response_instructions": "Confirm the playback change in one short sentence.",
+        "response_instructions": {
+            "success": "Confirm the playback change in one short sentence.",
+            "error": "Briefly say that the playback change could not be applied.",
+        },
         "parameters": {
             "type": "object",
             "properties": {
@@ -115,7 +124,10 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "select_exercise",
         "description": "Switches the active warm-up exercise on the user interface.",
-        "response_instructions": "Confirm the selected exercise in one short sentence.",
+        "response_instructions": {
+            "success": "Confirm the selected exercise in one short sentence.",
+            "error": "Briefly say that the exercise could not be selected.",
+        },
         "parameters": {
             "type": "object",
             "properties": {
@@ -131,7 +143,10 @@ VOICE_TOOLS = [
         "type": "function",
         "name": "end_session",
         "description": "Ends the current vocal coaching session after the user says goodbye or asks to stop.",
-        "response_instructions": "Say one brief farewell before ending the session.",
+        "response_instructions": {
+            "success": "Say one brief farewell before ending the session.",
+            "error": "Say one brief farewell and ask the user to end the session manually.",
+        },
         "parameters": {
             "type": "object",
             "properties": {},

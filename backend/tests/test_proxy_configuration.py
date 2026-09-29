@@ -8,10 +8,15 @@ class ProxyConfigurationTests(unittest.TestCase):
     def test_proxy_module_imports(self):
         self.assertTrue(callable(handle_agent_proxy))
 
-    def test_every_tool_has_response_instructions(self):
+    def test_every_tool_has_valid_response_instructions(self):
         self.assertTrue(VOICE_TOOLS)
         for tool in VOICE_TOOLS:
-            self.assertTrue(tool.get("response_instructions"), tool["name"])
+            instructions = tool.get("response_instructions")
+
+            self.assertIsInstance(instructions, dict, tool["name"])
+            self.assertEqual(set(instructions), {"success", "error"}, tool["name"])
+            self.assertTrue(instructions["success"].strip(), tool["name"])
+            self.assertTrue(instructions["error"].strip(), tool["name"])
 
     def test_session_uses_low_latency_transcription(self):
         session = get_session_update_payload()["session"]
