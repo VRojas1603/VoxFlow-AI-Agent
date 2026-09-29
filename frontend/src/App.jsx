@@ -105,7 +105,7 @@ export function App() {
                 "Lower the track key by one semitone"
               </span>
               <span className="px-2.5 py-1 rounded-full bg-slate-800/60 border border-purple-500/40 text-purple-300 flex items-center gap-1">
-                <Globe2 className="w-3 h-3 text-purple-400" /> "¿Podemos practicar en español?"
+                <Globe2 className="w-3 h-3 text-purple-400" /> "Can we practice in Spanish?"
               </span>
             </div>
           )}

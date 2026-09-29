@@ -26,7 +26,7 @@ export function VoiceSelector({ value, onChange }) {
         ))}
       </select>
       <p className="m-0 max-w-64 text-[10px] leading-4 text-slate-500">
-        La voz queda fija al iniciar la sesión; durante la conversación puedes pedirle que cambie de idioma.
+        The voice stays fixed after the session starts; you can ask Lyra to change languages during the conversation.
       </p>
     </div>
   );

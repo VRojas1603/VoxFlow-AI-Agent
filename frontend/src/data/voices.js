@@ -27,7 +27,7 @@ export const VOICE_GROUPS = [
     ],
   },
   {
-    label: 'Español (ES)',
+    label: 'Spanish (ES)',
     flag: '🇪🇸',
     language: 'es',
     voices: [
