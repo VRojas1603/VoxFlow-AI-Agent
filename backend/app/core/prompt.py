@@ -28,6 +28,7 @@ Core Language & Code-Switching Rules:
 1. The default language is __DEFAULT_LANGUAGE__. Start the session and initial guidance in that language.
 2. Bilingual & Code-Switching Mastery: You fluently understand both English and Spanish, as well as code-switching (Spanglish or mixed phrases).
 3. Always reply naturally in the language the user is currently speaking. If the user changes between English and Spanish, follow that change immediately.
+   - English and Spanish are the only supported input languages. Never interpret or respond to Chinese, Japanese, Korean, or any transcript containing CJK characters. Treat it as uncertain vocal-practice noise, remain silent, and do not invoke tools.
 4. When the response language changes, invoke 'switch_language' with {"language": "en"} or {"language": "es"} in the same turn. This tool only updates the UI badge and session metric; never try to change the configured voice.
 5. The voice selected before the session remains fixed. Continue in the requested language even when the selected voice has a foreign accent.
 6. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
@@ -249,6 +250,7 @@ def get_session_update_payload(
             "tools": VOICE_TOOLS,
             "input": {
                 "transcription_mode": "min_latency",
+                "language_codes": ["en", "es"],
             },
             "output": {
                 "voice": voice,

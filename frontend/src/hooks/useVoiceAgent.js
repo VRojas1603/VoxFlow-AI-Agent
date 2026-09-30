@@ -34,6 +34,7 @@ import {
   NotesPracticeTracker,
   createNotesPracticeState,
 } from '../audio/notesPractice';
+import { shouldIgnoreUserTranscript } from '../audio/transcriptFilters';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -781,9 +782,9 @@ export function useVoiceAgent() {
           if (eventType === 'transcript.user' || (eventType === 'transcript' && message.role === 'user')) {
             const text = message.text || '';
             if (text) {
-              const isNoisePattern = /^(dun|la|brr|hum|na|bum|\.|\s)+$/i.test(text.trim());
-              setUserTranscript(text);
-              if (!isNoisePattern) {
+              const shouldIgnore = shouldIgnoreUserTranscript(text);
+              setUserTranscript(shouldIgnore ? '' : text);
+              if (!shouldIgnore) {
                 setConversation((prev) => {
                   const next = [
                     ...prev,
@@ -799,7 +800,8 @@ export function useVoiceAgent() {
 
           // 9. Partial user delta transcript
           if (eventType === 'transcript.user.delta') {
-            setUserTranscript(message.text || message.delta || '');
+            const text = message.text || message.delta || '';
+            setUserTranscript(shouldIgnoreUserTranscript(text) ? '' : text);
             return;
           }
 

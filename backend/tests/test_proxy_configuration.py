@@ -22,8 +22,15 @@ class ProxyConfigurationTests(unittest.TestCase):
         session = get_session_update_payload()["session"]
 
         self.assertEqual(session["input"]["transcription_mode"], "min_latency")
-        self.assertNotIn("language_codes", session["input"])
+        self.assertEqual(session["input"]["language_codes"], ["en", "es"])
         self.assertNotIn("turn_detection", session["input"])
+
+    def test_agent_ignores_unsupported_cjk_transcripts(self):
+        prompt = get_session_update_payload()["session"]["system_prompt"]
+
+        self.assertIn("English and Spanish are the only supported input languages", prompt)
+        self.assertIn("transcript containing CJK characters", prompt)
+        self.assertIn("remain silent", prompt)
 
     def test_supported_voice_catalog_matches_expected_languages(self):
         self.assertEqual(VOICE_LANGUAGES["lola"], "es")
