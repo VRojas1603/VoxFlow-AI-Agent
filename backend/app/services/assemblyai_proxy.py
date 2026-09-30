@@ -5,14 +5,54 @@ from fastapi import WebSocket, WebSocketDisconnect
 import websockets
 
 from app.core.config import settings
-from app.core.prompt import get_session_update_payload, DEFAULT_VOICE_EN
+from app.core.prompt import DEFAULT_VOICE_EN, VOICE_LANGUAGES, get_session_update_payload
+from app.services.tool_coordinator import ToolCallCoordinator
 
 logger = logging.getLogger("voice_agent_proxy")
+
+
+def resolve_voice_config(requested_voice: str | None) -> tuple[str, str]:
+    """Validate the pre-session voice and return its linked initial language."""
+    voice = (requested_voice or DEFAULT_VOICE_EN).strip().lower()
+    if voice not in VOICE_LANGUAGES:
+        logger.warning("Unsupported voice '%s'; using %s", voice, DEFAULT_VOICE_EN)
+        voice = DEFAULT_VOICE_EN
+    return voice, VOICE_LANGUAGES[voice]
+
+
+async def finish_tool_reply(
+    tool_coordinator: ToolCallCoordinator,
+    send_to_aai,
+    send_to_client,
+    *,
+    pending_end_session: bool,
+    interrupted: bool,
+) -> bool:
+    """Finish tool calls and request a playback drain after a completed farewell."""
+    await tool_coordinator.finish_reply(interrupted=interrupted)
+    if pending_end_session and not interrupted:
+        await send_to_client({"type": "proxy.playback_drain_requested"})
+        logger.info("Waiting for client playback to finish before ending session")
+        return True
+    return False
+
+
+async def finish_end_session(send_to_aai, *, pending_end_session: bool) -> bool:
+    """End the upstream session after the client confirms playback is drained."""
+    if not pending_end_session:
+        return False
+    await send_to_aai({"type": "session.end"})
+    logger.info("Sent session.end after client playback finished")
+    return False
 
 
 async def handle_agent_proxy(client_ws: WebSocket):
     """Establishes a bidirectional bridge between the web client and the AssemblyAI Voice Agent WebSocket with bilingual support."""
     await client_ws.accept()
+
+    selected_voice, initial_language = resolve_voice_config(
+        client_ws.query_params.get("voice")
+    )
 
     api_key = settings.ASSEMBLYAI_API_KEY.strip()
     if not api_key or api_key == "tu_assemblyai_api_key_aqui":
@@ -38,39 +78,71 @@ async def handle_agent_proxy(client_ws: WebSocket):
         ) as aai_ws:
             logger.info("Connected to AssemblyAI Voice Agent WebSocket.")
 
-            # Send initial agent configuration (English default with Eve voice)
-            session_payload = get_session_update_payload(voice=DEFAULT_VOICE_EN)
-            await aai_ws.send(json.dumps(session_payload))
-            logger.info("Default English session.update payload sent to AssemblyAI.")
+            aai_send_lock = asyncio.Lock()
+
+            async def send_to_aai(payload):
+                message = json.dumps(payload) if isinstance(payload, dict) else payload
+                async with aai_send_lock:
+                    await aai_ws.send(message)
+
+            async def send_to_client(payload):
+                message = json.dumps(payload) if isinstance(payload, dict) else payload
+                await client_ws.send_text(message)
+
+            tool_coordinator = ToolCallCoordinator(send_to_aai, logger=logger)
+            pending_end_session = False
+
+            # Voice is immutable after this initial session.update.
+            session_payload = get_session_update_payload(
+                voice=selected_voice,
+                language=initial_language,
+            )
+            await send_to_aai(session_payload)
+            logger.info(
+                "Initial session.update sent [voice=%s, language=%s]",
+                selected_voice,
+                initial_language,
+            )
 
             # Task: Forward stream from web client to AssemblyAI
             async def forward_client_to_aai():
+                nonlocal pending_end_session
                 try:
                     while True:
                         data = await client_ws.receive()
                         if data.get("type") == "websocket.disconnect":
                             break
                         if "bytes" in data and data["bytes"]:
-                            await aai_ws.send(data["bytes"])
+                            await send_to_aai(data["bytes"])
                         elif "text" in data and data["text"]:
-                            # Check if the client requested an explicit voice/language switch
+                            text = data["text"]
                             try:
-                                ctrl = json.loads(data["text"])
-                                if ctrl.get("type") == "change_voice":
-                                    new_voice = ctrl.get("voice", "lola")
-                                    logger.info(f"Client requested manual voice change to {new_voice}")
-                                    update_msg = {
-                                        "type": "session.update",
-                                        "session": {
-                                            "output": {"voice": new_voice}
-                                        }
-                                    }
-                                    await aai_ws.send(json.dumps(update_msg))
-                                    continue
-                            except Exception:
-                                pass
+                                event = json.loads(text)
+                            except json.JSONDecodeError:
+                                event = None
 
-                            await aai_ws.send(data["text"])
+                            if isinstance(event, dict) and event.get("type") == "client.tool_result":
+                                call_id = event.get("call_id")
+                                if call_id:
+                                    tool_coordinator.set_client_result(
+                                        call_id,
+                                        event.get("result", {}),
+                                        is_error=bool(event.get("is_error")),
+                                    )
+                                else:
+                                    logger.warning("Ignoring client.tool_result without call_id")
+                                continue
+
+                            if isinstance(event, dict) and event.get("type") == "client.playback_drained":
+                                if event.get("timed_out"):
+                                    logger.warning("Client playback drain timed out before session end")
+                                pending_end_session = await finish_end_session(
+                                    send_to_aai,
+                                    pending_end_session=pending_end_session,
+                                )
+                                continue
+
+                            await send_to_aai(text)
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
                 except RuntimeError as e:
@@ -84,35 +156,57 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             # Task: Forward stream from AssemblyAI to web client
             async def forward_aai_to_client():
+                nonlocal pending_end_session
                 try:
                     async for message in aai_ws:
                         if isinstance(message, bytes):
                             await client_ws.send_bytes(message)
                         elif isinstance(message, str):
-                            await client_ws.send_text(message)
-
-                            # Intercept Tool Call to dynamically switch voice between 'eve' and 'lola'
                             try:
                                 event = json.loads(message)
-                                event_type = event.get("type") or event.get("event")
+                            except json.JSONDecodeError:
+                                await client_ws.send_text(message)
+                                continue
+
+                            if not isinstance(event, dict):
+                                await client_ws.send_text(message)
+                                continue
+
+                            event_type = event.get("type") or event.get("event")
+                            try:
                                 if event_type in ("tool.call", "tool_call"):
                                     tool = event.get("tool") or event
                                     tool_name = tool.get("name") or tool.get("function", {}).get("name")
-                                    if tool_name == "switch_language_voice":
-                                        params = tool.get("parameters") or tool.get("arguments") or {}
-                                        if isinstance(params, str):
-                                            params = json.loads(params)
-                                        target_voice = params.get("voice") or ("lola" if params.get("language") == "es" else "eve")
-                                        logger.info(f"Tool triggered voice switch to: {target_voice}")
-                                        voice_update = {
-                                            "type": "session.update",
-                                            "session": {
-                                                "output": {"voice": target_voice}
-                                            }
-                                        }
-                                        await aai_ws.send(json.dumps(voice_update))
-                            except Exception:
-                                pass
+                                    tool_call_id = tool.get("call_id") or tool.get("id") or event.get("call_id") or event.get("id")
+                                    if tool_call_id:
+                                        tool_arguments = tool.get("parameters") or tool.get("arguments") or tool.get("args") or {}
+                                        tool_coordinator.register(
+                                            tool_call_id,
+                                            tool_name or "unknown",
+                                            tool_arguments,
+                                        )
+                                        if tool_name == "end_session":
+                                            pending_end_session = True
+
+                            except Exception as ex:
+                                logger.warning(f"Error handling AssemblyAI event: {ex}")
+
+                            await client_ws.send_text(message)
+
+                            try:
+                                if event_type in ("reply.done", "reply_done"):
+                                    pending_end_session = await finish_tool_reply(
+                                        tool_coordinator,
+                                        send_to_aai,
+                                        send_to_client,
+                                        pending_end_session=pending_end_session,
+                                        interrupted=(
+                                            event.get("status") == "interrupted"
+                                            or bool(event.get("interrupted"))
+                                        ),
+                                    )
+                            except Exception as ex:
+                                logger.warning(f"Error coordinating AssemblyAI event: {ex}")
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
                 except RuntimeError as e:
@@ -134,6 +228,8 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             for task in pending:
                 task.cancel()
+            tool_coordinator.cancel_all()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     except websockets.exceptions.InvalidStatusCode as e:
         logger.error(f"AssemblyAI rejected connection (Status: {e.status_code}): {e}")

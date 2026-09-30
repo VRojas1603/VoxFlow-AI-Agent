@@ -9,17 +9,26 @@ export class StreamingPCMPlayer {
     this.nextStartTime = 0;
     this.activeSources = [];
     this.isPlaying = false;
+    this.idleWaiters = new Set();
   }
 
   async init() {
     if (!this.audioCtx) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       this.audioCtx = new AudioContextClass({ sampleRate: this.sampleRate });
+      this.analyser = this.audioCtx.createAnalyser();
+      this.analyser.fftSize = 128;
+      this.analyser.smoothingTimeConstant = 0.8;
+      this.analyser.connect(this.audioCtx.destination);
     }
     if (this.audioCtx.state === 'suspended') {
       await this.audioCtx.resume();
     }
     this.nextStartTime = this.audioCtx.currentTime;
+  }
+
+  getAnalyser() {
+    return this.analyser;
   }
 
   /**
@@ -66,7 +75,7 @@ export class StreamingPCMPlayer {
 
     const source = this.audioCtx.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(this.audioCtx.destination);
+    source.connect(this.analyser || this.audioCtx.destination);
 
     const currentTime = this.audioCtx.currentTime;
     if (this.nextStartTime < currentTime) {
@@ -85,8 +94,37 @@ export class StreamingPCMPlayer {
       }
       if (this.activeSources.length === 0) {
         this.isPlaying = false;
+        this.resolveIdleWaiters();
       }
     };
+  }
+
+  /**
+   * Resolves when every queued voice chunk has finished, with a timeout fallback.
+   */
+  waitForIdle(timeoutMs = 15000) {
+    if (this.activeSources.length === 0) {
+      return Promise.resolve({ timedOut: false });
+    }
+
+    return new Promise((resolve) => {
+      let timeoutId;
+      const finish = (timedOut = false) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        this.idleWaiters.delete(finish);
+        resolve({ timedOut });
+      };
+
+      this.idleWaiters.add(finish);
+      timeoutId = setTimeout(() => finish(true), timeoutMs);
+    });
+  }
+
+  resolveIdleWaiters(timedOut = false) {
+    const waiters = Array.from(this.idleWaiters);
+    for (const finish of waiters) {
+      finish(timedOut);
+    }
   }
 
   /**
@@ -97,12 +135,13 @@ export class StreamingPCMPlayer {
       try {
         source.stop();
         source.disconnect();
-      } catch (e) {
+      } catch {
         // Ignore if already stopped
       }
     }
     this.activeSources = [];
     this.isPlaying = false;
+    this.resolveIdleWaiters();
     if (this.audioCtx) {
       this.nextStartTime = this.audioCtx.currentTime;
     }

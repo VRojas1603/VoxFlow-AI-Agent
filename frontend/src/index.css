@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+@theme {
+  --animate-fade-in: fade-in 200ms ease-out both;
+  --animate-fade-slide-in: fade-slide-in 250ms ease-out both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @layer base {
   body {
     @apply bg-slate-950 text-slate-100 antialiased min-h-screen selection:bg-purple-500/30 selection:text-purple-200;

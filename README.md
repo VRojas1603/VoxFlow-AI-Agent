@@ -13,10 +13,11 @@
 3. **Bilingual Mastery & Code-Switching ("Lola" for Spanish):** Seamlessly detects language switches. When Spanish or mixed Spanglish is spoken, Lyra automatically responds in fluent Spanish and switches to AssemblyAI's native Spanish voice **Lola**.
 4. **Natural Turn Detection & Interruption Handling (Barge-in):** You can interrupt Lyra at any moment during explanations or vocal instructions. The client audio immediately stops and Lyra prioritizes your question.
 5. **Hands-Free Interface Control via Tool Calling:**
-   - `show_vocal_tip`: Displays visual anatomical/pedagogical guidance cards on screen (diaphragmatic breath, lip trills, head voice, posture, sirens).
-   - `adjust_music_playback`: Modifies the key/pitch (semitones) or speed of the accompaniment track when a note is too high or low.
-   - `switch_language_voice`: Dynamically updates the active voice profile between **Eve** (English) and **Lola** (Spanish).
-   - `select_exercise`: Switches the active vocal warm-up routine upon voice command.
+   - `show_vocal_tip`: Displays and narrates visual technique guidance only when the user requests an explanation or guide.
+   - `control_accompaniment`: Starts or stops the active accompaniment and reports the actual browser playback state.
+   - `adjust_accompaniment`: Applies relative or absolute changes to accompaniment pitch, speed, and volume.
+   - `switch_language`: Updates the interface language while preserving the voice selected before the session.
+   - `select_exercise`: Stops playback, clears the previous tip, and switches the active vocal warm-up routine.
 6. **High-Performance Audio Pipeline:** Utilizes browser `AudioWorklet` to stream 16-bit linear PCM audio at 24 kHz directly to AssemblyAI via base64 JSON frames, coupled with a seamless streaming PCM audio queue.
 7. **Secure Proxy Architecture:** Your secret AssemblyAI API key is never exposed to the client browser. The Python FastAPI backend acts as a secure, authenticated WebSocket proxy.
 

@@ -5,6 +5,8 @@ import { VoiceOrb } from './components/VoiceOrb';
 import { TipCard } from './components/TipCard';
 import { ExerciseSelector } from './components/ExerciseSelector';
 import { TranscriptView } from './components/TranscriptView';
+import { PitchMonitor } from './components/PitchMonitor';
+import { SessionSummaryModal } from './components/SessionSummaryModal';
 import { AlertTriangle, Sparkles, Info, Globe2 } from 'lucide-react';
 
 export function App() {
@@ -20,9 +22,23 @@ export function App() {
     playbackSettings,
     activeExercise,
     setActiveExercise,
+    isPlayingAccompaniment,
+    toggleAccompaniment,
+    currentNote,
+    accompanimentVolume,
+    setAccompanimentVolume,
+    adjustPitchManually,
+    adjustSpeedManually,
+    getMicAnalyser,
+    getPlayerAnalyser,
+    isSummaryOpen,
+    summaryStats,
+    closeSummary,
+    sessionSeconds,
     errorMessage,
+    selectedVoice,
+    selectVoice,
     voiceProfile,
-    switchVoiceManual,
     connect,
     disconnect,
   } = useVoiceAgent();
@@ -42,8 +58,10 @@ export function App() {
         status={status}
         onConnect={connect}
         onDisconnect={disconnect}
+        selectedVoice={selectedVoice}
+        onVoiceChange={selectVoice}
         voiceProfile={voiceProfile}
-        onSwitchVoice={switchVoiceManual}
+        sessionSeconds={sessionSeconds}
       />
 
       {/* Error notification banner if any */}
@@ -70,6 +88,8 @@ export function App() {
             isListening={isListening}
             agentTranscript={agentTranscript}
             userTranscript={userTranscript}
+            getMicAnalyser={getMicAnalyser}
+            getPlayerAnalyser={getPlayerAnalyser}
           />
 
           {/* Prompt suggestions when connected */}
@@ -85,7 +105,7 @@ export function App() {
                 "Lower the track key by one semitone"
               </span>
               <span className="px-2.5 py-1 rounded-full bg-slate-800/60 border border-purple-500/40 text-purple-300 flex items-center gap-1">
-                <Globe2 className="w-3 h-3 text-purple-400" /> "¿Podemos practicar en español?"
+                <Globe2 className="w-3 h-3 text-purple-400" /> "Can we practice in Spanish?"
               </span>
             </div>
           )}
@@ -98,16 +118,30 @@ export function App() {
             {/* Vocal Technique Tip Card (Tool Call from AssemblyAI) */}
             <TipCard activeTip={activeTip} onClose={handleCloseTip} />
 
-            {/* Exercise Selector */}
+            {/* Exercise Selector with Accompaniment Controls */}
             <ExerciseSelector
               activeExercise={activeExercise}
               onSelectExercise={handleSelectExercise}
               playbackSettings={playbackSettings}
+              isPlayingAccompaniment={isPlayingAccompaniment}
+              onToggleAccompaniment={toggleAccompaniment}
+              currentNote={currentNote}
+              accompanimentVolume={accompanimentVolume}
+              onVolumeChange={setAccompanimentVolume}
+              onPitchAdjust={adjustPitchManually}
+              onSpeedAdjust={adjustSpeedManually}
             />
           </div>
 
-          {/* Right Column: Live Transcript & Session Insights (5 cols) */}
+          {/* Right Column: Live Pitch Monitor, Transcript & Session Insights (5 cols) */}
           <div className="lg:col-span-5 flex flex-col gap-5">
+            {/* Real-time Vocal Pitch & Tuning Gauge */}
+            <PitchMonitor
+              getMicAnalyser={getMicAnalyser}
+              isListening={isListening}
+              targetNote={currentNote}
+            />
+
             <TranscriptView conversation={conversation} />
 
             {/* Technology & Code-Switching info card */}
@@ -118,7 +152,7 @@ export function App() {
                   AssemblyAI Bilingual & Code-Switching Voice Agent
                 </span>
                 <p className="m-0 leading-relaxed">
-                  Defaults to English with voice <strong>Eve</strong>. When Spanish or mixed language is detected, the agent seamlessly responds in Spanish and activates AssemblyAI's native Spanish voice <strong>Lola</strong>. Full support for <strong>barge-in</strong> interruptions and voice-driven <strong>tool calling</strong>.
+                  Choose the session voice before connecting; that voice remains fixed while Lyra follows your spoken language in English, Spanish, or mixed conversation. Full support for <strong>barge-in</strong> interruptions and voice-driven <strong>tool calling</strong>.
                 </p>
               </div>
             </div>
@@ -130,6 +164,17 @@ export function App() {
       <footer className="border-t border-slate-800/60 py-4 text-center text-xs text-slate-500">
         <p className="m-0">VoxFlow • AI Vocal Coach powered by AssemblyAI Voice Agent (lablab.ai)</p>
       </footer>
+
+      {/* Post-Session Performance & Workout Summary Modal */}
+      <SessionSummaryModal
+        isOpen={isSummaryOpen}
+        onClose={closeSummary}
+        stats={summaryStats}
+        onStartNewSession={() => {
+          closeSummary();
+          connect();
+        }}
+      />
     </div>
   );
 }
