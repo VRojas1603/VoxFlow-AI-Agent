@@ -287,6 +287,35 @@ export class ScaleEngine {
   }
 
   /**
+   * Play a soft two-tone cue without creating pitch targets or exercise attempts.
+   */
+  playReadyCue() {
+    this.init();
+    const now = this.audioCtx.currentTime;
+    const cueGain = this.audioCtx.createGain();
+    cueGain.gain.setValueAtTime(0.001, now);
+    cueGain.gain.linearRampToValueAtTime(0.16, now + 0.02);
+    cueGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    cueGain.connect(this.masterGain);
+
+    const tones = [660, 880];
+    tones.forEach((frequency, index) => {
+      const oscillator = this.audioCtx.createOscillator();
+      const startsAt = now + (index * 0.1);
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, startsAt);
+      oscillator.connect(cueGain);
+      this.trackSource(oscillator);
+      oscillator.start(startsAt);
+      oscillator.stop(startsAt + 0.12);
+    });
+
+    return new Promise((resolve) => {
+      setTimeout(resolve, 240);
+    });
+  }
+
+  /**
    * Start the active exercise loop.
    */
   start(exerciseId = this.currentExercise) {

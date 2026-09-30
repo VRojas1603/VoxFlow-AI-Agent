@@ -67,6 +67,8 @@ class ProxyConfigurationTests(unittest.TestCase):
             tool["parameters"]["properties"]["action"]["enum"],
             ["play", "stop"],
         )
+        self.assertIn("three-second visual countdown", tool["description"])
+        self.assertIn("finish within three seconds", tool["response_instructions"]["success"])
 
     def test_accompaniment_adjustment_distinguishes_relative_and_absolute_changes(self):
         tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "adjust_accompaniment")

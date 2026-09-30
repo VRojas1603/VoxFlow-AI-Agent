@@ -56,6 +56,7 @@ export function ExerciseSelector({
   onSelectExercise,
   playbackSettings,
   isPlayingAccompaniment,
+  accompanimentStart,
   onToggleAccompaniment,
   currentNote,
   accompanimentVolume = 0.4,
@@ -66,6 +67,10 @@ export function ExerciseSelector({
 }) {
   const pitchShift = playbackSettings?.pitchShift || 0;
   const speed = playbackSettings?.speed || 1.0;
+  const isStartPending = (
+    accompanimentStart?.phase === 'countdown'
+    || accompanimentStart?.phase === 'waiting_for_voice'
+  );
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur-sm flex flex-col gap-4">
@@ -143,7 +148,7 @@ export function ExerciseSelector({
               disabled={disabled}
               onClick={onToggleAccompaniment}
               className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 shadow-md ${
-                isPlayingAccompaniment
+                isPlayingAccompaniment || isStartPending
                   ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
                   : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 shadow-purple-600/20'
               }`}
@@ -151,6 +156,10 @@ export function ExerciseSelector({
               {isPlayingAccompaniment ? (
                 <>
                   <Square className="w-3.5 h-3.5 fill-current" /> Stop Scale
+                </>
+              ) : isStartPending ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" /> Cancel Start
                 </>
               ) : (
                 <>
@@ -161,7 +170,17 @@ export function ExerciseSelector({
 
             {/* Live Playing Note Pill */}
             <div className="flex items-center gap-2">
-              {isPlayingAccompaniment && currentNote ? (
+              {accompanimentStart?.phase === 'countdown' ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs font-medium animate-pulse">
+                  <Radio className="w-3 h-3 text-amber-400" />
+                  <span>Starting in {accompanimentStart.secondsRemaining}</span>
+                </div>
+              ) : accompanimentStart?.phase === 'waiting_for_voice' ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-200 text-xs font-medium animate-pulse">
+                  <Radio className="w-3 h-3 text-sky-400" />
+                  <span>Waiting for Lyra</span>
+                </div>
+              ) : isPlayingAccompaniment && currentNote ? (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-200 text-xs font-medium animate-pulse">
                   <Radio className="w-3 h-3 text-purple-400 animate-spin" />
                   <span className="font-semibold">{currentNote.noteName}</span>

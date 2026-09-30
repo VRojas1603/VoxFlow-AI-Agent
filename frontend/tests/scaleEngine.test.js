@@ -128,6 +128,25 @@ test('emits glide targets with direction and frequency boundaries', () => {
   assert.ok(target.endFrequencyHz > target.startFrequencyHz);
 });
 
+test('ready cue does not emit targets or create exercise attempts', async () => {
+  const engine = new ScaleEngine();
+  attachFakeAudioContext(engine);
+  let targetEvents = 0;
+  let exerciseEvents = 0;
+  engine.onTargetChange(() => {
+    targetEvents += 1;
+  });
+  engine.onExerciseEvent(() => {
+    exerciseEvents += 1;
+  });
+
+  await engine.playReadyCue();
+
+  assert.equal(targetEvents, 0);
+  assert.equal(exerciseEvents, 0);
+  assert.equal(engine.attemptSequence, 0);
+});
+
 test('stops automatically after one complete guided lip trill attempt', () => {
   const engine = new ScaleEngine();
   attachFakeAudioContext(engine);

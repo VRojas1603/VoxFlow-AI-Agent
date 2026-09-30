@@ -24,6 +24,7 @@ export function App() {
     activeExercise,
     setActiveExercise,
     isPlayingAccompaniment,
+    accompanimentStart,
     toggleAccompaniment,
     currentNote,
     pitchData,
@@ -166,6 +167,7 @@ export function App() {
               onSelectExercise={handleSelectExercise}
               playbackSettings={playbackSettings}
               isPlayingAccompaniment={isPlayingAccompaniment}
+              accompanimentStart={accompanimentStart}
               onToggleAccompaniment={toggleAccompaniment}
               currentNote={currentNote}
               accompanimentVolume={accompanimentVolume}

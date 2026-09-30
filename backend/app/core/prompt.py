@@ -117,9 +117,9 @@ VOICE_TOOLS = [
     {
         "type": "function",
         "name": "control_accompaniment",
-        "description": "Starts or stops the accompaniment track. Call this whenever the user asks to play, start, pause, or stop the accompaniment, scale, track, or music.",
+        "description": "Schedules or stops the accompaniment track. Every play request starts a three-second visual countdown for the active exercise. Call this whenever the user asks to play, start, pause, or stop the accompaniment, scale, track, or music.",
         "response_instructions": {
-            "success": "Briefly confirm the actual playback state reported by the tool result.",
+            "success": "If playback is scheduled, say only that it will start after the countdown. Keep the confirmation short enough to finish within three seconds. Otherwise, briefly confirm the actual playback state reported by the tool result.",
             "error": "Briefly say that the accompaniment action could not be applied.",
         },
         "parameters": {

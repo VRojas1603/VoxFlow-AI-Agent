@@ -2,6 +2,10 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
 import { scaleEngine } from '../audio/scaleEngine';
 import {
+  ACCOMPANIMENT_START_PHASES,
+  AccompanimentStartCoordinator,
+} from '../audio/accompanimentStartCoordinator';
+import {
   DEFAULT_ACCOMPANIMENT_STATE,
   applyAccompanimentAdjustment,
   resetAccompanimentEngine,
@@ -57,6 +61,12 @@ export function useVoiceAgent() {
   });
   const [activeExercise, setActiveExercise] = useState('warmup_breathing');
   const [isPlayingAccompaniment, setIsPlayingAccompaniment] = useState(false);
+  const [accompanimentStart, setAccompanimentStart] = useState({
+    phase: ACCOMPANIMENT_START_PHASES.IDLE,
+    secondsRemaining: null,
+    source: null,
+    exerciseId: null,
+  });
   const [currentNote, setCurrentNote] = useState(null);
   const [accompanimentVolume, setAccompanimentVolumeState] = useState(
     DEFAULT_ACCOMPANIMENT_STATE.volume,
@@ -97,6 +107,8 @@ export function useVoiceAgent() {
   const reportTransitionTimersRef = useRef(new Set());
   const reportGenerationStartedRef = useRef(false);
   const finalFeedbackTextRef = useRef('');
+  const accompanimentStartCoordinatorRef = useRef(null);
+  const voicePlaybackGenerationRef = useRef(0);
 
   const handlePitchAnalysis = useCallback((analysis) => {
     performanceTrackerRef.current.handleAnalysis(analysis);
@@ -132,6 +144,16 @@ export function useVoiceAgent() {
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
     pcmPlayerRef.current = new StreamingPCMPlayer(24000);
+    accompanimentStartCoordinatorRef.current = new AccompanimentStartCoordinator({
+      startPlayback: (exerciseId) => scaleEngine.start(exerciseId),
+      playReadyCue: () => scaleEngine.playReadyCue(),
+      onStateChange: setAccompanimentStart,
+      onTimeout: () => {
+        scaleEngine.stop({ reason: 'start_timeout' });
+        setIsPlayingAccompaniment(false);
+        setErrorMessage('Accompaniment start timed out. Please try again.');
+      },
+    });
     const unsubscribeTarget = scaleEngine.onTargetChange((noteInfo) => {
       performanceTrackerRef.current.handleTarget(noteInfo);
       setCurrentNote(noteInfo);
@@ -139,13 +161,18 @@ export function useVoiceAgent() {
     const unsubscribeExerciseEvent = scaleEngine.onExerciseEvent((exerciseEvent) => {
       const result = performanceTrackerRef.current.handleExerciseEvent(exerciseEvent);
       if (exerciseEvent.type === 'playback.started') setIsPlayingAccompaniment(true);
-      if (exerciseEvent.type === 'playback.stopped') setIsPlayingAccompaniment(false);
+      if (exerciseEvent.type === 'playback.stopped') {
+        setIsPlayingAccompaniment(false);
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+      }
       if (result) setSessionPerformance(performanceTrackerRef.current.getSnapshot());
     });
 
     return () => {
       unsubscribeTarget();
       unsubscribeExerciseEvent();
+      accompanimentStartCoordinatorRef.current?.cancel();
+      accompanimentStartCoordinatorRef.current = null;
       pcmPlayerRef.current?.close();
       scaleEngine.stop();
     };
@@ -238,6 +265,7 @@ export function useVoiceAgent() {
     finalFeedbackTextRef.current = '';
     stopSessionTimer();
     stopMicrophone();
+    accompanimentStartCoordinatorRef.current?.cancel();
     scaleEngine.stop();
     setIsPlayingAccompaniment(false);
     clearReportTransitionTimers();
@@ -275,6 +303,7 @@ export function useVoiceAgent() {
 
     stopMicrophone();
     pcmPlayerRef.current?.stopAll();
+    accompanimentStartCoordinatorRef.current?.cancel();
     scaleEngine.stop();
     setIsPlayingAccompaniment(false);
     setStatus('disconnected');
@@ -368,6 +397,7 @@ export function useVoiceAgent() {
   }, []);
 
   const selectExercise = useCallback((exerciseId) => {
+    accompanimentStartCoordinatorRef.current?.cancel();
     const result = applyExerciseSelection(scaleEngine, exerciseId);
     setActiveExercise(exerciseId);
     setIsPlayingAccompaniment(false);
@@ -416,22 +446,37 @@ export function useVoiceAgent() {
       const action = parameters.action;
       if (action === 'play') {
         const wasPlaying = scaleEngine.isPlaying;
-        if (!wasPlaying) scaleEngine.start();
-        setIsPlayingAccompaniment(true);
+        if (wasPlaying) {
+          return {
+            status: 'success',
+            applied: false,
+            playback: 'playing',
+            exercise_id: scaleEngine.currentExercise,
+          };
+        }
+
+        const request = accompanimentStartCoordinatorRef.current?.requestStart({
+          source: 'voice',
+          exerciseId: scaleEngine.currentExercise,
+        });
+        if (request?.accepted) setErrorMessage(null);
         return {
           status: 'success',
-          applied: !wasPlaying,
-          playback: 'playing',
+          applied: Boolean(request?.accepted),
+          playback: 'scheduled',
+          countdown_seconds: 3,
+          start_phase: request?.phase || ACCOMPANIMENT_START_PHASES.IDLE,
           exercise_id: scaleEngine.currentExercise,
         };
       }
       if (action === 'stop') {
         const wasPlaying = scaleEngine.isPlaying;
-        scaleEngine.stop();
+        const cancelledStart = accompanimentStartCoordinatorRef.current?.cancel() || false;
+        scaleEngine.stop({ reason: 'manual' });
         setIsPlayingAccompaniment(false);
         return {
           status: 'success',
-          applied: wasPlaying,
+          applied: wasPlaying || cancelledStart,
           playback: 'stopped',
         };
       }
@@ -463,6 +508,7 @@ export function useVoiceAgent() {
       reportGenerationStartedRef.current = false;
       finalFeedbackTextRef.current = '';
       processedToolCallsRef.current.clear();
+      accompanimentStartCoordinatorRef.current?.cancel();
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
         voice: selectedVoice,
@@ -548,6 +594,8 @@ export function useVoiceAgent() {
 
           // 4. Agent reply started
           if (eventType === 'reply.started') {
+            voicePlaybackGenerationRef.current += 1;
+            accompanimentStartCoordinatorRef.current?.notifyVoiceStarted();
             setIsSpeaking(true);
             return;
           }
@@ -557,16 +605,38 @@ export function useVoiceAgent() {
             const wasInterrupted = message.status === 'interrupted' || message.interrupted;
             if (wasInterrupted) {
               console.log('[Barge-in]: Agent interrupted by user');
+              voicePlaybackGenerationRef.current += 1;
               pcmPlayerRef.current?.stopAll();
+              if (accompanimentStartCoordinatorRef.current?.isPending()) {
+                accompanimentStartCoordinatorRef.current.cancel();
+                scaleEngine.stop({ reason: 'interrupted' });
+              }
+              setIsSpeaking(false);
+              return;
             }
+            const playbackGeneration = voicePlaybackGenerationRef.current;
+            const drainResult = await pcmPlayerRef.current?.waitForIdle();
+            if (playbackGeneration !== voicePlaybackGenerationRef.current) return;
             setIsSpeaking(false);
+            if (drainResult?.timedOut) {
+              accompanimentStartCoordinatorRef.current?.cancel();
+              scaleEngine.stop({ reason: 'voice_timeout' });
+              setErrorMessage('Lyra’s voice playback did not finish in time. Please try again.');
+              return;
+            }
+            accompanimentStartCoordinatorRef.current?.notifyVoiceReady();
             return;
           }
 
           // 6. Interruption event
           if (eventType === 'interruption' || message.interrupted) {
             console.log('[Barge-in]: Interruption detected');
+            voicePlaybackGenerationRef.current += 1;
             pcmPlayerRef.current?.stopAll();
+            if (accompanimentStartCoordinatorRef.current?.isPending()) {
+              accompanimentStartCoordinatorRef.current.cancel();
+              scaleEngine.stop({ reason: 'interrupted' });
+            }
             setIsSpeaking(false);
             return;
           }
@@ -732,13 +802,21 @@ export function useVoiceAgent() {
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
     if (scaleEngine.isPlaying) {
-      scaleEngine.stop();
+      accompanimentStartCoordinatorRef.current?.cancel();
+      scaleEngine.stop({ reason: 'manual' });
+      setIsPlayingAccompaniment(false);
+    } else if (accompanimentStartCoordinatorRef.current?.isPending()) {
+      accompanimentStartCoordinatorRef.current.cancel();
+      scaleEngine.stop({ reason: 'manual' });
       setIsPlayingAccompaniment(false);
     } else {
       scaleEngine.setPitchShift(playbackSettings.pitchShift);
       scaleEngine.setSpeed(playbackSettings.speed);
-      scaleEngine.start(activeExercise);
-      setIsPlayingAccompaniment(true);
+      const request = accompanimentStartCoordinatorRef.current?.requestStart({
+        source: 'manual',
+        exerciseId: activeExercise,
+      });
+      if (request?.accepted) setErrorMessage(null);
     }
   }, [activeExercise, playbackSettings]);
 
@@ -795,6 +873,7 @@ export function useVoiceAgent() {
     activeExercise,
     setActiveExercise: selectExercise,
     isPlayingAccompaniment,
+    accompanimentStart,
     toggleAccompaniment,
     currentNote,
     currentTarget: currentNote,
