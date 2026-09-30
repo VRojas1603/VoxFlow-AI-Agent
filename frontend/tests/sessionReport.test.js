@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildSessionReport, serializeSessionReport } from '../src/reports/sessionReport.js';
+import {
+  buildAgentPerformanceSummary,
+  buildSessionReport,
+  serializeSessionReport,
+} from '../src/reports/sessionReport.js';
 
 function createAttempt(exerciseId) {
   const isLipTrill = exerciseId === 'warmup_lip_trill';
@@ -17,12 +21,16 @@ function createAttempt(exerciseId) {
           withinTolerancePercent: 78,
           medianDeviationCents: 18,
           stableNotes: 7,
+          missedNotes: 1,
+          octaveErrorNotes: 0,
         }
       : {
           rangeSemitones: 19.5,
+          rangeCoveragePercent: 98,
           continuityPercent: 82,
           directionMatchPercent: 91,
           smoothMovementPercent: 76,
+          interruptions: 0,
         },
     strengths: ['The measured pitch was consistent.'],
     focusAreas: ['Keep the upper part of the exercise connected.'],
@@ -107,4 +115,48 @@ test('uses neutral feedback when no guided attempt was completed', () => {
   });
 
   assert.match(report.finalFeedback.text, /no complete guided exercise/i);
+});
+
+test('uses the spoken agent feedback in the completed report', () => {
+  const performance = {
+    breathingCycles: 0,
+    lipTrillAttempts: [createAttempt('warmup_lip_trill')],
+    sirenAttempts: [],
+    lastAttempt: createAttempt('warmup_lip_trill'),
+  };
+  const report = buildSessionReport({
+    durationFormatted: '02:10',
+    exercisesPracticed: ['Lip Trill Scale'],
+    tipsCovered: [],
+    languageSwitches: 0,
+    keyShiftsUsed: 0,
+    speedChangesUsed: 0,
+    volumeChangesUsed: 0,
+    messageCount: 8,
+    performance,
+    finalFeedbackText: 'Your pitch stayed centered. Connect the last two notes next time. Goodbye!',
+  });
+
+  assert.equal(report.finalFeedback.status, 'agent');
+  assert.match(report.finalFeedback.text, /Connect the last two notes/);
+});
+
+test('builds the bounded performance payload sent for final voice feedback', () => {
+  const lipTrill = createAttempt('warmup_lip_trill');
+  const siren = createAttempt('warmup_sirens');
+  const summary = buildAgentPerformanceSummary({
+    durationSeconds: 180,
+    performance: {
+      breathingCycles: 1,
+      lipTrillAttempts: [lipTrill],
+      sirenAttempts: [siren],
+      lastAttempt: siren,
+    },
+  });
+
+  assert.equal(summary.duration_seconds, 180);
+  assert.equal(summary.breathing_cycles, 1);
+  assert.equal(summary.lip_trill_attempts[0].metrics.detected_notes, 8);
+  assert.equal(summary.vocal_siren_attempts[0].metrics.continuity_percent, 82);
+  assert.match(summary.deterministic_feedback.next_action, /Repeat the exercise/);
 });

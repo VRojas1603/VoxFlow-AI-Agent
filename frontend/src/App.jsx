@@ -76,6 +76,7 @@ export function App() {
         voiceProfile={voiceProfile}
         sessionSeconds={sessionSeconds}
         isSessionReview={isSessionReview}
+        sessionView={sessionView}
       />
 
       {/* Error notification banner if any */}

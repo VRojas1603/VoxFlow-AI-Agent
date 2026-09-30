@@ -46,8 +46,13 @@ export function buildSessionReport({
   volumeChangesUsed,
   messageCount,
   performance,
+  finalFeedbackText = '',
   completedAt = new Date(),
 }) {
+  const fallbackFeedback = buildFallbackFeedback(performance);
+  const agentFeedback = typeof finalFeedbackText === 'string'
+    ? finalFeedbackText.trim()
+    : '';
   return {
     id: `session-${completedAt.getTime()}`,
     completedAt: completedAt.toISOString(),
@@ -66,7 +71,64 @@ export function buildSessionReport({
       volumeChanges: volumeChangesUsed,
     },
     signalQuality: performance.lastAttempt?.signalQuality || 'insufficient',
-    finalFeedback: buildFallbackFeedback(performance),
+    finalFeedback: agentFeedback
+      ? { ...fallbackFeedback, status: 'agent', text: agentFeedback }
+      : fallbackFeedback,
+  };
+}
+
+function mapFeedback(attempt) {
+  return {
+    strengths: [...attempt.strengths],
+    focus_areas: [...attempt.focusAreas],
+    next_action: attempt.nextAction,
+  };
+}
+
+function mapLipTrillAttempt(attempt) {
+  return {
+    attempt_number: attempt.attemptNumber,
+    signal_quality: attempt.signalQuality,
+    metrics: {
+      detected_notes: attempt.metrics.detectedNotes,
+      expected_notes: attempt.metrics.expectedNotes,
+      within_tolerance_percent: attempt.metrics.withinTolerancePercent,
+      median_deviation_cents: attempt.metrics.medianDeviationCents,
+      stable_notes: attempt.metrics.stableNotes,
+      missed_notes: attempt.metrics.missedNotes,
+      octave_error_notes: attempt.metrics.octaveErrorNotes,
+    },
+    ...mapFeedback(attempt),
+  };
+}
+
+function mapSirenAttempt(attempt) {
+  return {
+    attempt_number: attempt.attemptNumber,
+    signal_quality: attempt.signalQuality,
+    metrics: {
+      range_semitones: attempt.metrics.rangeSemitones,
+      range_coverage_percent: attempt.metrics.rangeCoveragePercent,
+      continuity_percent: attempt.metrics.continuityPercent,
+      direction_match_percent: attempt.metrics.directionMatchPercent,
+      smooth_movement_percent: attempt.metrics.smoothMovementPercent,
+      interruptions: attempt.metrics.interruptions,
+    },
+    ...mapFeedback(attempt),
+  };
+}
+
+export function buildAgentPerformanceSummary({ durationSeconds, performance }) {
+  const fallbackFeedback = buildFallbackFeedback(performance);
+  return {
+    duration_seconds: durationSeconds,
+    breathing_cycles: performance.breathingCycles,
+    lip_trill_attempts: performance.lipTrillAttempts.map(mapLipTrillAttempt),
+    vocal_siren_attempts: performance.sirenAttempts.map(mapSirenAttempt),
+    deterministic_feedback: {
+      text: fallbackFeedback.text,
+      next_action: fallbackFeedback.nextAction,
+    },
   };
 }
 

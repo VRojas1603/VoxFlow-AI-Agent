@@ -12,9 +12,11 @@ export function Header({
   voiceProfile,
   sessionSeconds = 0,
   isSessionReview = false,
+  sessionView = 'voice',
 }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
+  const isReportReady = sessionView === 'report_ready' || sessionView === 'starting_new_session';
   const activeVoice = getVoice(voiceProfile?.voice);
 
   const mins = Math.floor(sessionSeconds / 60);
@@ -80,7 +82,7 @@ export function Header({
             />
             <span>
               {isSessionReview
-                ? 'Session Complete'
+                ? isReportReady ? 'Session Complete' : 'Generating Report'
                 : isConnected
                 ? 'Live Connected'
                 : isConnecting

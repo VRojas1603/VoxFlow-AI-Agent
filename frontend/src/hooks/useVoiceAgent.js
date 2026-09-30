@@ -17,7 +17,10 @@ import {
   SessionPerformanceTracker,
   createEmptySessionPerformance,
 } from '../audio/performanceEvaluator';
-import { buildSessionReport } from '../reports/sessionReport';
+import {
+  buildAgentPerformanceSummary,
+  buildSessionReport,
+} from '../reports/sessionReport';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -92,6 +95,8 @@ export function useVoiceAgent() {
   const processedToolCallsRef = useRef(new Map());
   const performanceTrackerRef = useRef(new SessionPerformanceTracker());
   const reportTransitionTimersRef = useRef(new Set());
+  const reportGenerationStartedRef = useRef(false);
+  const finalFeedbackTextRef = useRef('');
 
   const handlePitchAnalysis = useCallback((analysis) => {
     performanceTrackerRef.current.handleAnalysis(analysis);
@@ -220,6 +225,34 @@ export function useVoiceAgent() {
     setIsListening(false);
   }, []);
 
+  const stopSessionTimer = useCallback(() => {
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+  }, []);
+
+  const beginReportGeneration = useCallback(() => {
+    if (reportGenerationStartedRef.current) return;
+    reportGenerationStartedRef.current = true;
+    finalFeedbackTextRef.current = '';
+    stopSessionTimer();
+    stopMicrophone();
+    scaleEngine.stop();
+    setIsPlayingAccompaniment(false);
+    clearReportTransitionTimers();
+    setSessionReport(null);
+    setReportGenerationStep('analyzing');
+    setSessionView('voice_exiting');
+    scheduleReportTransition(() => setSessionView('generating_report'), 320);
+    scheduleReportTransition(() => setReportGenerationStep('preparing'), 760);
+  }, [
+    clearReportTransitionTimers,
+    scheduleReportTransition,
+    stopMicrophone,
+    stopSessionTimer,
+  ]);
+
   const selectVoice = useCallback((voiceId) => {
     setSelectedVoice(voiceId);
     setVoiceProfile({
@@ -230,6 +263,7 @@ export function useVoiceAgent() {
 
   const finishSession = useCallback(({ closeSocket = true } = {}) => {
     const hadActiveSession = sessionActiveRef.current;
+    const reportGenerationStarted = reportGenerationStartedRef.current;
     sessionActiveRef.current = false;
     pendingVoiceEndRef.current = false;
 
@@ -250,10 +284,7 @@ export function useVoiceAgent() {
       voice: selectedVoice,
     });
 
-    if (sessionTimerRef.current) {
-      clearInterval(sessionTimerRef.current);
-      sessionTimerRef.current = null;
-    }
+    stopSessionTimer();
 
     if (!hadActiveSession) return;
 
@@ -271,21 +302,33 @@ export function useVoiceAgent() {
       volumeChangesUsed: volumeChangesCountRef.current,
       messageCount: conversationRef.current.length,
       performance: performanceTrackerRef.current.getSnapshot(),
+      finalFeedbackText: finalFeedbackTextRef.current,
     });
     clearReportTransitionTimers();
     setSessionReport(report);
-    setReportGenerationStep('analyzing');
-    setSessionView('voice_exiting');
-    scheduleReportTransition(() => setSessionView('generating_report'), 320);
-    scheduleReportTransition(() => setReportGenerationStep('preparing'), 720);
-    scheduleReportTransition(() => setReportGenerationStep('finalizing'), 1120);
-    scheduleReportTransition(() => setSessionView('loading_exiting'), 1520);
-    scheduleReportTransition(() => setSessionView('report_ready'), 1840);
+    reportGenerationStartedRef.current = false;
+    finalFeedbackTextRef.current = '';
+
+    if (reportGenerationStarted) {
+      setReportGenerationStep('finalizing');
+      setSessionView('generating_report');
+      scheduleReportTransition(() => setSessionView('loading_exiting'), 420);
+      scheduleReportTransition(() => setSessionView('report_ready'), 740);
+    } else {
+      setReportGenerationStep('analyzing');
+      setSessionView('voice_exiting');
+      scheduleReportTransition(() => setSessionView('generating_report'), 320);
+      scheduleReportTransition(() => setReportGenerationStep('preparing'), 720);
+      scheduleReportTransition(() => setReportGenerationStep('finalizing'), 1120);
+      scheduleReportTransition(() => setSessionView('loading_exiting'), 1520);
+      scheduleReportTransition(() => setSessionView('report_ready'), 1840);
+    }
   }, [
     clearReportTransitionTimers,
     scheduleReportTransition,
     selectedVoice,
     stopMicrophone,
+    stopSessionTimer,
   ]);
 
   const applyPlaybackAdjustment = useCallback((command) => {
@@ -354,7 +397,11 @@ export function useVoiceAgent() {
       return { status: 'success', applied: true, language: lang };
     } else if (name === 'end_session') {
       pendingVoiceEndRef.current = true;
-      return { status: 'success', applied: true };
+      beginReportGeneration();
+      return buildAgentPerformanceSummary({
+        durationSeconds: sessionSecondsRef.current,
+        performance: performanceTrackerRef.current.getSnapshot(),
+      });
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
         tipType: parameters.tip_type || 'posture',
@@ -396,7 +443,7 @@ export function useVoiceAgent() {
     }
 
     throw new Error(`Unsupported tool: ${name || 'unknown'}`);
-  }, [applyPlaybackAdjustment, selectExercise]);
+  }, [applyPlaybackAdjustment, beginReportGeneration, selectExercise]);
 
   // Connect to the Voice Agent
   const connect = useCallback(async () => {
@@ -413,6 +460,8 @@ export function useVoiceAgent() {
       setAgentTranscript('');
       setActiveTip(null);
       pendingVoiceEndRef.current = false;
+      reportGenerationStartedRef.current = false;
+      finalFeedbackTextRef.current = '';
       processedToolCallsRef.current.clear();
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
@@ -511,9 +560,6 @@ export function useVoiceAgent() {
               pcmPlayerRef.current?.stopAll();
             }
             setIsSpeaking(false);
-            if (pendingVoiceEndRef.current && wasInterrupted) {
-              pendingVoiceEndRef.current = false;
-            }
             return;
           }
 
@@ -529,6 +575,9 @@ export function useVoiceAgent() {
           if (eventType === 'transcript.agent' || (eventType === 'transcript' && message.role === 'agent')) {
             const text = message.text || '';
             if (text) {
+              if (pendingVoiceEndRef.current && reportGenerationStartedRef.current) {
+                finalFeedbackTextRef.current = text;
+              }
               setAgentTranscript(text);
               setConversation((prev) => {
                 const next = [
@@ -578,6 +627,7 @@ export function useVoiceAgent() {
             }
 
             let outcome = processedToolCallsRef.current.get(callId);
+            const toolName = toolData.name || toolData.function?.name;
             if (!outcome) {
               try {
                 outcome = {
@@ -599,17 +649,25 @@ export function useVoiceAgent() {
             }
 
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'client.tool_result',
-                call_id: callId,
-                result: outcome.result,
-                is_error: outcome.is_error,
-              }));
+              if (toolName === 'end_session' && !outcome.is_error) {
+                ws.send(JSON.stringify({
+                  type: 'client.performance_summary',
+                  call_id: callId,
+                  summary: outcome.result,
+                }));
+              } else {
+                ws.send(JSON.stringify({
+                  type: 'client.tool_result',
+                  call_id: callId,
+                  result: outcome.result,
+                  is_error: outcome.is_error,
+                }));
+              }
             }
             return;
           }
 
-          // Wait until the farewell audio queue is empty before ending the upstream session.
+          // Wait until final coaching feedback has finished playing before ending the session.
           if (eventType === 'proxy.playback_drain_requested') {
             const drainResult = await pcmPlayerRef.current?.waitForIdle();
             if (ws.readyState === WebSocket.OPEN) {
@@ -618,6 +676,23 @@ export function useVoiceAgent() {
                 timed_out: Boolean(drainResult?.timedOut),
               }));
             }
+            return;
+          }
+
+          if (eventType === 'proxy.session_end_cancelled') {
+            pendingVoiceEndRef.current = false;
+            reportGenerationStartedRef.current = false;
+            finalFeedbackTextRef.current = '';
+            clearReportTransitionTimers();
+            setSessionView('voice');
+            setReportGenerationStep('analyzing');
+            if (!sessionTimerRef.current) {
+              sessionTimerRef.current = setInterval(() => {
+                sessionSecondsRef.current += 1;
+                setSessionSeconds(sessionSecondsRef.current);
+              }, 1000);
+            }
+            await startMicrophone(ws);
             return;
           }
 

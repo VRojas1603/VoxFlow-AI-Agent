@@ -55,7 +55,9 @@ class ProxyConfigurationTests(unittest.TestCase):
 
         self.assertEqual(end_tool["parameters"]["properties"], {})
         self.assertEqual(end_tool["parameters"]["required"], [])
-        self.assertIn("one brief farewell", get_session_update_payload()["session"]["system_prompt"])
+        self.assertEqual(end_tool["execution_mode"], "hold")
+        self.assertIn("final measured coaching feedback", get_session_update_payload()["session"]["system_prompt"])
+        self.assertIn("Use only performance_summary", end_tool["response_instructions"]["success"])
 
     def test_accompaniment_control_supports_play_and_stop(self):
         tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "control_accompaniment")

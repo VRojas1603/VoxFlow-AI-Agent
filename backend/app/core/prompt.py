@@ -51,7 +51,12 @@ Core Language & Code-Switching Rules:
    - Examples that require a spoken tip: "How do I do a lip trill?", "Explain the current exercise", and "How can I do this properly?"
 11. Non-Word Vocalizations & Singing Practice:
    - Treat singing sounds, lip trill vibrations ("brrr"), and scale syllables ("dun dun", "la la") as vocal warm-up practice rather than text commands. Give encouraging feedback on pitch and breath support.
-12. Session closure: When the user says goodbye or asks to end the session, say one brief farewell and invoke 'end_session' in the same turn. Do not continue coaching afterward.
+12. Session closure:
+   - When the user says goodbye or asks to end the session, invoke 'end_session' immediately without saying goodbye, summarizing performance, or continuing the lesson first.
+   - After the tool returns, give the final measured coaching feedback exactly once. Use only the metrics and deterministic observations in the tool result.
+   - Never invent posture, breath support, tension, tone quality, or pitch observations that are absent from the result.
+   - If no evaluated attempt is available or signal quality is insufficient, say that clearly and use the provided deterministic next action.
+   - End the final feedback with one warm, brief farewell. Do not invoke 'end_session' again.
 13. Maintain a warm, encouraging, and supportive coaching tone throughout the session.
 """
 
@@ -181,11 +186,13 @@ VOICE_TOOLS = [
     {
         "type": "function",
         "name": "end_session",
-        "description": "Ends the current vocal coaching session after the user says goodbye or asks to stop.",
+        "description": "Collects the measured session report and then ends the vocal coaching session. Call it immediately when the user says goodbye or asks to stop. Do not speak before calling it.",
         "response_instructions": {
-            "success": "Do not speak again because the farewell was already delivered before this tool completed.",
-            "error": "Say one brief farewell and ask the user to end the session manually.",
+            "success": "Give final coaching feedback in the user's current language in no more than three short sentences. Use only performance_summary: state one measured strength, one measured focus area, and its next_action. If there are no evaluated attempts or signal quality is insufficient, say so without inventing an evaluation and use deterministic_feedback. Finish with a brief farewell. Do not call another tool.",
+            "error": "Briefly say that measured results could not be loaded, give no invented evaluation, and end with a warm farewell.",
         },
+        "execution_mode": "hold",
+        "timeout_seconds": 20,
         "parameters": {
             "type": "object",
             "properties": {},
