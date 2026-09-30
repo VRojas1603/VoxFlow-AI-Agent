@@ -2,7 +2,13 @@ import asyncio
 import unittest
 
 from app.services.tool_coordinator import ToolCallCoordinator
-from app.services.assemblyai_proxy import finish_end_session, finish_tool_reply
+from app.services.assemblyai_proxy import (
+    END_FEEDBACK_PENDING,
+    END_PLAYBACK_PENDING,
+    END_TOOL_PENDING,
+    finish_end_session,
+    finish_tool_reply,
+)
 
 
 class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
@@ -76,7 +82,7 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.sent, [])
 
-    async def test_end_session_is_sent_after_tool_result(self):
+    async def test_end_session_is_sent_after_final_feedback_playback(self):
         self.coordinator.register("call-7", "end_session", {})
         self.coordinator.set_client_result("call-7", {"status": "success", "applied": True})
         client_events = []
@@ -84,48 +90,65 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         async def capture_client(event):
             client_events.append(event)
 
-        pending = await finish_tool_reply(
+        state = await finish_tool_reply(
             self.coordinator,
             self.capture,
             capture_client,
-            pending_end_session=True,
+            end_session_state=END_TOOL_PENDING,
             interrupted=False,
         )
 
-        self.assertTrue(pending)
+        self.assertEqual(state, END_FEEDBACK_PENDING)
         self.assertEqual([event["type"] for event in self.sent], ["tool.result"])
-        self.assertEqual(client_events, [{"type": "proxy.playback_drain_requested"}])
+        self.assertEqual(client_events, [])
 
-        pending = await finish_end_session(
+        state = await finish_tool_reply(
+            self.coordinator,
             self.capture,
-            pending_end_session=pending,
+            capture_client,
+            end_session_state=state,
+            interrupted=False,
         )
 
-        self.assertFalse(pending)
+        self.assertEqual(state, END_PLAYBACK_PENDING)
+        self.assertEqual(client_events, [{"type": "proxy.playback_drain_requested"}])
+
+        state = await finish_end_session(
+            self.capture,
+            end_session_state=state,
+        )
+
+        self.assertIsNone(state)
         self.assertEqual([event["type"] for event in self.sent], ["tool.result", "session.end"])
 
     async def test_interrupted_farewell_does_not_end_session(self):
         self.coordinator.register("call-8", "end_session", {})
 
-        pending = await finish_tool_reply(
+        state = await finish_tool_reply(
             self.coordinator,
             self.capture,
             self.capture,
-            pending_end_session=True,
+            end_session_state=END_TOOL_PENDING,
             interrupted=True,
         )
 
-        self.assertFalse(pending)
-        self.assertEqual(self.sent, [])
+        self.assertIsNone(state)
+        self.assertEqual(self.sent, [{"type": "proxy.session_end_cancelled"}])
 
     async def test_playback_confirmation_without_pending_end_is_ignored(self):
-        pending = await finish_end_session(
+        state = await finish_end_session(
             self.capture,
-            pending_end_session=False,
+            end_session_state=None,
         )
 
-        self.assertFalse(pending)
+        self.assertIsNone(state)
         self.assertEqual(self.sent, [])
+
+    async def test_pending_tool_name_is_available_for_result_validation(self):
+        self.coordinator.register("call-summary", "end_session", {})
+
+        self.assertEqual(self.coordinator.get_pending_name("call-summary"), "end_session")
+        self.assertIsNone(self.coordinator.get_pending_name("missing"))
 
     async def test_client_error_is_forwarded_to_agent(self):
         self.coordinator.register("call-9", "control_accompaniment", {"action": "play"})

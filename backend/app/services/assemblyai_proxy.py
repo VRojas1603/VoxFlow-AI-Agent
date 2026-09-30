@@ -6,9 +6,14 @@ import websockets
 
 from app.core.config import settings
 from app.core.prompt import DEFAULT_VOICE_EN, VOICE_LANGUAGES, get_session_update_payload
+from app.services.performance_summary import sanitize_performance_summary
 from app.services.tool_coordinator import ToolCallCoordinator
 
 logger = logging.getLogger("voice_agent_proxy")
+
+END_TOOL_PENDING = "tool_pending"
+END_FEEDBACK_PENDING = "feedback_pending"
+END_PLAYBACK_PENDING = "playback_pending"
 
 
 def resolve_voice_config(requested_voice: str | None) -> tuple[str, str]:
@@ -25,25 +30,31 @@ async def finish_tool_reply(
     send_to_aai,
     send_to_client,
     *,
-    pending_end_session: bool,
+    end_session_state: str | None,
     interrupted: bool,
-) -> bool:
-    """Finish tool calls and request a playback drain after a completed farewell."""
+) -> str | None:
+    """Advance the final feedback flow after an AssemblyAI reply completes."""
     await tool_coordinator.finish_reply(interrupted=interrupted)
-    if pending_end_session and not interrupted:
+    if end_session_state == END_TOOL_PENDING:
+        if interrupted:
+            await send_to_client({"type": "proxy.session_end_cancelled"})
+            return None
+        logger.info("Sent measured session summary; waiting for final feedback reply")
+        return END_FEEDBACK_PENDING
+    if end_session_state == END_FEEDBACK_PENDING:
         await send_to_client({"type": "proxy.playback_drain_requested"})
-        logger.info("Waiting for client playback to finish before ending session")
-        return True
-    return False
+        logger.info("Waiting for final feedback playback to finish before ending session")
+        return END_PLAYBACK_PENDING
+    return end_session_state
 
 
-async def finish_end_session(send_to_aai, *, pending_end_session: bool) -> bool:
-    """End the upstream session after the client confirms playback is drained."""
-    if not pending_end_session:
-        return False
+async def finish_end_session(send_to_aai, *, end_session_state: str | None) -> str | None:
+    """End the upstream session after final feedback playback is drained."""
+    if end_session_state != END_PLAYBACK_PENDING:
+        return end_session_state
     await send_to_aai({"type": "session.end"})
-    logger.info("Sent session.end after client playback finished")
-    return False
+    logger.info("Sent session.end after final feedback playback finished")
+    return None
 
 
 async def handle_agent_proxy(client_ws: WebSocket):
@@ -90,7 +101,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
                 await client_ws.send_text(message)
 
             tool_coordinator = ToolCallCoordinator(send_to_aai, logger=logger)
-            pending_end_session = False
+            end_session_state = None
 
             # Voice is immutable after this initial session.update.
             session_payload = get_session_update_payload(
@@ -106,7 +117,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             # Task: Forward stream from web client to AssemblyAI
             async def forward_client_to_aai():
-                nonlocal pending_end_session
+                nonlocal end_session_state
                 try:
                     while True:
                         data = await client_ws.receive()
@@ -124,6 +135,12 @@ async def handle_agent_proxy(client_ws: WebSocket):
                             if isinstance(event, dict) and event.get("type") == "client.tool_result":
                                 call_id = event.get("call_id")
                                 if call_id:
+                                    if tool_coordinator.get_pending_name(call_id) == "end_session":
+                                        logger.warning(
+                                            "Ignoring unvalidated end_session tool result [id=%s]",
+                                            call_id,
+                                        )
+                                        continue
                                     tool_coordinator.set_client_result(
                                         call_id,
                                         event.get("result", {}),
@@ -133,12 +150,35 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                     logger.warning("Ignoring client.tool_result without call_id")
                                 continue
 
+                            if isinstance(event, dict) and event.get("type") == "client.performance_summary":
+                                call_id = event.get("call_id")
+                                if not call_id:
+                                    logger.warning("Ignoring performance summary without call_id")
+                                    continue
+                                if tool_coordinator.get_pending_name(call_id) != "end_session":
+                                    logger.warning(
+                                        "Ignoring performance summary for unknown call [id=%s]",
+                                        call_id,
+                                    )
+                                    continue
+                                summary = sanitize_performance_summary(event.get("summary"))
+                                tool_coordinator.set_client_result(
+                                    call_id,
+                                    {
+                                        "status": "success",
+                                        "applied": True,
+                                        "performance_summary": summary,
+                                    },
+                                )
+                                logger.info("Validated final performance summary [id=%s]", call_id)
+                                continue
+
                             if isinstance(event, dict) and event.get("type") == "client.playback_drained":
                                 if event.get("timed_out"):
                                     logger.warning("Client playback drain timed out before session end")
-                                pending_end_session = await finish_end_session(
+                                end_session_state = await finish_end_session(
                                     send_to_aai,
-                                    pending_end_session=pending_end_session,
+                                    end_session_state=end_session_state,
                                 )
                                 continue
 
@@ -156,7 +196,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             # Task: Forward stream from AssemblyAI to web client
             async def forward_aai_to_client():
-                nonlocal pending_end_session
+                nonlocal end_session_state
                 try:
                     async for message in aai_ws:
                         if isinstance(message, bytes):
@@ -186,7 +226,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                             tool_arguments,
                                         )
                                         if tool_name == "end_session":
-                                            pending_end_session = True
+                                            end_session_state = END_TOOL_PENDING
 
                             except Exception as ex:
                                 logger.warning(f"Error handling AssemblyAI event: {ex}")
@@ -195,11 +235,11 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
                             try:
                                 if event_type in ("reply.done", "reply_done"):
-                                    pending_end_session = await finish_tool_reply(
+                                    end_session_state = await finish_tool_reply(
                                         tool_coordinator,
                                         send_to_aai,
                                         send_to_client,
-                                        pending_end_session=pending_end_session,
+                                        end_session_state=end_session_state,
                                         interrupted=(
                                             event.get("status") == "interrupted"
                                             or bool(event.get("interrupted"))

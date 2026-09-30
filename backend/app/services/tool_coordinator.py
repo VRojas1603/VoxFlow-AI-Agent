@@ -66,6 +66,10 @@ class ToolCallCoordinator:
         self._logger.info("Received client tool result [tool=%s, id=%s]", pending.name, call_id)
         return True
 
+    def get_pending_name(self, call_id: str) -> str | None:
+        pending = self._pending.get(call_id)
+        return pending.name if pending else None
+
     async def finish_reply(self, *, interrupted: bool = False) -> None:
         if interrupted:
             self._logger.info(
