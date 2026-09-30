@@ -13,6 +13,10 @@ import {
 } from '../audio/exerciseControls';
 import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
 import { usePitchTracking } from './usePitchTracking';
+import {
+  SessionPerformanceTracker,
+  createEmptySessionPerformance,
+} from '../audio/performanceEvaluator';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -62,6 +66,9 @@ export function useVoiceAgent() {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [summaryStats, setSummaryStats] = useState(null);
   const [sessionSeconds, setSessionSeconds] = useState(0);
+  const [sessionPerformance, setSessionPerformance] = useState(
+    createEmptySessionPerformance,
+  );
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -81,6 +88,11 @@ export function useVoiceAgent() {
   const speedChangesCountRef = useRef(0);
   const volumeChangesCountRef = useRef(0);
   const processedToolCallsRef = useRef(new Map());
+  const performanceTrackerRef = useRef(new SessionPerformanceTracker());
+
+  const handlePitchAnalysis = useCallback((analysis) => {
+    performanceTrackerRef.current.handleAnalysis(analysis);
+  }, []);
 
   const {
     pitchData,
@@ -90,17 +102,26 @@ export function useVoiceAgent() {
   } = usePitchTracking({
     analyserRef: micAnalyserRef,
     enabled: isListening && !isSpeaking,
+    onAnalysis: handlePitchAnalysis,
   });
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
     pcmPlayerRef.current = new StreamingPCMPlayer(24000);
     const unsubscribeTarget = scaleEngine.onTargetChange((noteInfo) => {
+      performanceTrackerRef.current.handleTarget(noteInfo);
       setCurrentNote(noteInfo);
+    });
+    const unsubscribeExerciseEvent = scaleEngine.onExerciseEvent((exerciseEvent) => {
+      const result = performanceTrackerRef.current.handleExerciseEvent(exerciseEvent);
+      if (exerciseEvent.type === 'playback.started') setIsPlayingAccompaniment(true);
+      if (exerciseEvent.type === 'playback.stopped') setIsPlayingAccompaniment(false);
+      if (result) setSessionPerformance(performanceTrackerRef.current.getSnapshot());
     });
 
     return () => {
       unsubscribeTarget();
+      unsubscribeExerciseEvent();
       pcmPlayerRef.current?.close();
       scaleEngine.stop();
     };
@@ -369,6 +390,8 @@ export function useVoiceAgent() {
       keyShiftsCountRef.current = 0;
       speedChangesCountRef.current = 0;
       volumeChangesCountRef.current = 0;
+      performanceTrackerRef.current.reset();
+      setSessionPerformance(createEmptySessionPerformance());
 
       resetAccompanimentEngine(scaleEngine);
       setActiveExercise('warmup_breathing');
@@ -666,6 +689,8 @@ export function useVoiceAgent() {
     pitchSignalQuality,
     latestPitchSampleRef,
     latestPitchAnalysisRef,
+    sessionPerformance,
+    lastExerciseFeedback: sessionPerformance.lastAttempt,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,

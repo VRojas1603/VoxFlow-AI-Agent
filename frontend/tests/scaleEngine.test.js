@@ -127,3 +127,40 @@ test('emits glide targets with direction and frequency boundaries', () => {
   assert.equal(target.durationMs, 2200);
   assert.ok(target.endFrequencyHz > target.startFrequencyHz);
 });
+
+test('stops automatically after one complete guided lip trill attempt', () => {
+  const engine = new ScaleEngine();
+  attachFakeAudioContext(engine);
+  engine.currentExercise = 'warmup_lip_trill';
+  engine.isPlaying = true;
+  engine.stepIndex = 8;
+  engine.ensureAttemptId();
+  const events = [];
+  engine.onExerciseEvent((event) => events.push(event));
+  const originalSetTimeout = globalThis.setTimeout;
+  let scheduledCallback = null;
+  let scheduledDelay = null;
+  globalThis.setTimeout = (callback, delay) => {
+    scheduledCallback = callback;
+    scheduledDelay = delay;
+    return 1;
+  };
+
+  try {
+    engine.runLoopStep();
+    assert.equal(scheduledDelay, 800);
+    assert.equal(engine.isPlaying, true);
+
+    scheduledCallback();
+
+    assert.equal(engine.isPlaying, false);
+    assert.ok(events.some((event) => event.type === 'attempt.completed'));
+    assert.ok(events.some((event) => (
+      event.type === 'playback.stopped' && event.reason === 'completed'
+    )));
+    assert.equal(events.some((event) => event.type === 'attempt.cancelled'), false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    engine.stop();
+  }
+});

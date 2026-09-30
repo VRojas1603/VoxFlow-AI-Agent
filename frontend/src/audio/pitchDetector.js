@@ -64,6 +64,8 @@ export function createPitchAnalyzer(overrides = {}) {
         return {
           sample: null,
           signalQuality: 'quiet',
+          audioTime: options.audioTime ?? null,
+          capturedAtMs: options.capturedAtMs ?? null,
           rms,
           clarity: 0,
         };
@@ -75,6 +77,8 @@ export function createPitchAnalyzer(overrides = {}) {
         return {
           sample: null,
           signalQuality: 'unclear',
+          audioTime: options.audioTime ?? null,
+          capturedAtMs: options.capturedAtMs ?? null,
           rms,
           clarity: Number.isFinite(clarity) ? clarity : 0,
         };
@@ -87,6 +91,8 @@ export function createPitchAnalyzer(overrides = {}) {
         return {
           sample: null,
           signalQuality: 'out_of_range',
+          audioTime: options.audioTime ?? null,
+          capturedAtMs: options.capturedAtMs ?? null,
           rms,
           clarity,
         };
@@ -95,6 +101,8 @@ export function createPitchAnalyzer(overrides = {}) {
       const pitch = frequencyToPitch(frequencyHz);
       return {
         signalQuality: 'valid',
+        audioTime: options.audioTime ?? null,
+        capturedAtMs: options.capturedAtMs ?? null,
         rms,
         clarity,
         sample: {

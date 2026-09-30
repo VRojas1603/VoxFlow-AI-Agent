@@ -34,8 +34,10 @@ export class ScaleEngine {
     this.baseKeyOffset = 0; // For automatic ascension in lip trills
     this.onNoteChangeCallback = null;
     this.targetChangeListeners = new Set();
+    this.exerciseEventListeners = new Set();
     this.attemptSequence = 0;
     this.currentAttemptId = null;
+    this.currentAttemptStartedAtMs = null;
     this.activeSources = new Set();
     this.scheduledTimeouts = new Set();
   }
@@ -95,12 +97,44 @@ export class ScaleEngine {
     }
   }
 
+  onExerciseEvent(cb) {
+    this.exerciseEventListeners.add(cb);
+    return () => this.exerciseEventListeners.delete(cb);
+  }
+
+  emitExerciseEvent(event) {
+    for (const listener of this.exerciseEventListeners) {
+      listener(event);
+    }
+  }
+
   ensureAttemptId() {
     if (!this.currentAttemptId) {
       this.attemptSequence += 1;
       this.currentAttemptId = `${this.currentExercise}-${this.attemptSequence}`;
+      this.currentAttemptStartedAtMs = getTimelineTimeMs();
+      this.emitExerciseEvent({
+        type: 'attempt.started',
+        exerciseId: this.currentExercise,
+        attemptId: this.currentAttemptId,
+        startedAtMs: this.currentAttemptStartedAtMs,
+      });
     }
     return this.currentAttemptId;
+  }
+
+  completeGuidedAttempt() {
+    if (!this.isPlaying || !this.currentAttemptId) return;
+
+    const event = {
+      type: 'attempt.completed',
+      exerciseId: this.currentExercise,
+      attemptId: this.currentAttemptId,
+      startedAtMs: this.currentAttemptStartedAtMs,
+      completedAtMs: getTimelineTimeMs(),
+    };
+    this.emitExerciseEvent(event);
+    this.stop({ reason: 'completed', emitAttemptCancelled: false });
   }
 
   trackSource(source) {
@@ -263,6 +297,12 @@ export class ScaleEngine {
     this.stepIndex = 0;
     this.baseKeyOffset = 0;
     this.currentAttemptId = null;
+    this.currentAttemptStartedAtMs = null;
+    this.emitExerciseEvent({
+      type: 'playback.started',
+      exerciseId: this.currentExercise,
+      startedAtMs: getTimelineTimeMs(),
+    });
 
     this.runLoopStep();
   }
@@ -271,6 +311,7 @@ export class ScaleEngine {
     if (!this.isPlaying) return;
 
     let stepDelayMs = 500;
+    let completesAttempt = false;
 
     switch (this.currentExercise) {
       case 'warmup_breathing': {
@@ -309,7 +350,7 @@ export class ScaleEngine {
 
         stepDelayMs = 1000 / this.speed;
         this.stepIndex = (this.stepIndex + 1) % 16;
-        if (this.stepIndex === 0) this.currentAttemptId = null;
+        completesAttempt = this.stepIndex === 0;
         break;
       }
 
@@ -333,7 +374,7 @@ export class ScaleEngine {
           // Completed one scale repetition; transpose up by 1 semitone
           this.stepIndex = 0;
           this.baseKeyOffset = (this.baseKeyOffset + 1) % 7; // Ascend up to +7 semitones then reset
-          this.currentAttemptId = null;
+          completesAttempt = true;
           stepDelayMs = (800 / this.speed); // Brief breath pause between keys
         } else {
           stepDelayMs = (400 / this.speed);
@@ -362,7 +403,7 @@ export class ScaleEngine {
         }
 
         this.stepIndex = (this.stepIndex + 1) % 2;
-        if (this.stepIndex === 0) this.currentAttemptId = null;
+        completesAttempt = this.stepIndex === 0;
         stepDelayMs = (duration + 0.3) * 1000;
         break;
       }
@@ -422,14 +463,29 @@ export class ScaleEngine {
     }
 
     this.timerId = setTimeout(() => {
-      this.runLoopStep();
+      if (completesAttempt) {
+        this.completeGuidedAttempt();
+      } else {
+        this.runLoopStep();
+      }
     }, stepDelayMs);
   }
 
   /**
    * Stop playback and cancel scheduled timer.
    */
-  stop() {
+  stop({ reason = 'manual', emitAttemptCancelled = true } = {}) {
+    const wasPlaying = this.isPlaying;
+    const cancelledAttempt = wasPlaying && emitAttemptCancelled && this.currentAttemptId
+      ? {
+          type: 'attempt.cancelled',
+          exerciseId: this.currentExercise,
+          attemptId: this.currentAttemptId,
+          startedAtMs: this.currentAttemptStartedAtMs,
+          cancelledAtMs: getTimelineTimeMs(),
+          reason,
+        }
+      : null;
     this.isPlaying = false;
     if (this.timerId) {
       clearTimeout(this.timerId);
@@ -448,7 +504,17 @@ export class ScaleEngine {
     }
     this.activeSources.clear();
     this.currentAttemptId = null;
+    this.currentAttemptStartedAtMs = null;
     this.emitTarget(null);
+    if (cancelledAttempt) this.emitExerciseEvent(cancelledAttempt);
+    if (wasPlaying) {
+      this.emitExerciseEvent({
+        type: 'playback.stopped',
+        exerciseId: this.currentExercise,
+        reason,
+        stoppedAtMs: getTimelineTimeMs(),
+      });
+    }
   }
 }
 
