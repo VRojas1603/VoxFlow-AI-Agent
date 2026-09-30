@@ -190,9 +190,9 @@ async def handle_agent_proxy(client_ws: WebSocket):
                     if "disconnect" in str(e).lower():
                         pass
                     else:
-                        logger.error(f"RuntimeError client -> AssemblyAI: {e}")
-                except Exception as e:
-                    logger.error(f"Error forwarding client -> AssemblyAI: {e}")
+                        logger.exception("RuntimeError forwarding client -> AssemblyAI")
+                except Exception:
+                    logger.exception("Error forwarding client -> AssemblyAI")
 
             # Task: Forward stream from AssemblyAI to web client
             async def forward_aai_to_client():
@@ -253,9 +253,9 @@ async def handle_agent_proxy(client_ws: WebSocket):
                     if "disconnect" in str(e).lower():
                         pass
                     else:
-                        logger.error(f"RuntimeError AssemblyAI -> client: {e}")
-                except Exception as e:
-                    logger.error(f"Error forwarding AssemblyAI -> client: {e}")
+                        logger.exception("RuntimeError forwarding AssemblyAI -> client")
+                except Exception:
+                    logger.exception("Error forwarding AssemblyAI -> client")
 
             # Run both forwarding tasks concurrently
             client_task = asyncio.create_task(forward_client_to_aai())
@@ -282,7 +282,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
         except Exception:
             pass
     except Exception as e:
-        logger.error(f"WebSocket proxy exception: {e}")
+        logger.exception("WebSocket proxy exception")
         try:
             await client_ws.send_json({
                 "type": "error",
