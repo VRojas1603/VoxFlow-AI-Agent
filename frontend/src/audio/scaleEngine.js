@@ -16,6 +16,10 @@ export function midiToNoteName(midiNote) {
   return `${NOTE_NAMES[noteIndex]}${octave}`;
 }
 
+function getTimelineTimeMs() {
+  return typeof performance === 'undefined' ? Date.now() : performance.now();
+}
+
 export class ScaleEngine {
   constructor() {
     this.audioCtx = null;
@@ -29,6 +33,9 @@ export class ScaleEngine {
     this.stepIndex = 0;
     this.baseKeyOffset = 0; // For automatic ascension in lip trills
     this.onNoteChangeCallback = null;
+    this.targetChangeListeners = new Set();
+    this.attemptSequence = 0;
+    this.currentAttemptId = null;
     this.activeSources = new Set();
     this.scheduledTimeouts = new Set();
   }
@@ -76,6 +83,26 @@ export class ScaleEngine {
     this.onNoteChangeCallback = cb;
   }
 
+  onTargetChange(cb) {
+    this.targetChangeListeners.add(cb);
+    return () => this.targetChangeListeners.delete(cb);
+  }
+
+  emitTarget(target) {
+    this.onNoteChangeCallback?.(target);
+    for (const listener of this.targetChangeListeners) {
+      listener(target);
+    }
+  }
+
+  ensureAttemptId() {
+    if (!this.currentAttemptId) {
+      this.attemptSequence += 1;
+      this.currentAttemptId = `${this.currentExercise}-${this.attemptSequence}`;
+    }
+    return this.currentAttemptId;
+  }
+
   trackSource(source) {
     this.activeSources.add(source);
     source.addEventListener('ended', () => {
@@ -87,7 +114,7 @@ export class ScaleEngine {
   /**
    * Synthesize a single acoustic note with a warm, natural piano-like ADSR envelope.
    */
-  playSynthNote(midiNote, durationSec, velocity = 0.8) {
+  playSynthNote(midiNote, durationSec, velocity = 0.8, targetMetadata = {}) {
     if (!this.audioCtx || this.audioCtx.state === 'suspended') {
       this.init();
     }
@@ -123,20 +150,28 @@ export class ScaleEngine {
     osc1.stop(now + durationSec + 0.05);
     osc2.stop(now + durationSec + 0.05);
 
-    if (this.onNoteChangeCallback) {
-      const noteName = midiToNoteName(midiNote + this.pitchShift);
-      this.onNoteChangeCallback({
-        noteName,
-        freq: Math.round(freq * 10) / 10,
-        midiNote: midiNote + this.pitchShift,
-      });
-    }
+    const targetMidi = midiNote + this.pitchShift;
+    this.emitTarget({
+      eventType: 'target.started',
+      targetType: 'note',
+      exerciseId: this.currentExercise,
+      attemptId: targetMetadata.attemptId || this.ensureAttemptId(),
+      startedAt: now,
+      timelineStartedAtMs: getTimelineTimeMs(),
+      durationMs: Math.round(durationSec * 1000),
+      sequenceIndex: targetMetadata.sequenceIndex ?? 0,
+      sequenceLength: targetMetadata.sequenceLength ?? 1,
+      noteName: midiToNoteName(targetMidi),
+      freq: Math.round(freq * 10) / 10,
+      frequencyHz: freq,
+      midiNote: targetMidi,
+    });
   }
 
   /**
    * Play continuous glissando sweep for Vocal Sirens exercise with lowpass smoothing.
    */
-  playGlissando(startMidi, endMidi, durationSec) {
+  playGlissando(startMidi, endMidi, durationSec, targetMetadata = {}) {
     if (!this.audioCtx) this.init();
     const startFreq = midiToFreq(startMidi + this.pitchShift);
     const endFreq = midiToFreq(endMidi + this.pitchShift);
@@ -169,13 +204,28 @@ export class ScaleEngine {
     osc.start(now);
     osc.stop(now + durationSec + 0.05);
 
-    if (this.onNoteChangeCallback) {
-      this.onNoteChangeCallback({
-        noteName: `${midiToNoteName(startMidi + this.pitchShift)} ~ ${midiToNoteName(endMidi + this.pitchShift)}`,
-        freq: Math.round(startFreq),
-        midiNote: startMidi + this.pitchShift,
-      });
-    }
+    const targetStartMidi = startMidi + this.pitchShift;
+    const targetEndMidi = endMidi + this.pitchShift;
+    this.emitTarget({
+      eventType: 'target.started',
+      targetType: 'glide',
+      exerciseId: this.currentExercise,
+      attemptId: targetMetadata.attemptId || this.ensureAttemptId(),
+      startedAt: now,
+      timelineStartedAtMs: getTimelineTimeMs(),
+      durationMs: Math.round(durationSec * 1000),
+      sequenceIndex: targetMetadata.sequenceIndex ?? 0,
+      sequenceLength: targetMetadata.sequenceLength ?? 1,
+      direction: targetEndMidi > targetStartMidi ? 'up' : 'down',
+      noteName: `${midiToNoteName(targetStartMidi)} ~ ${midiToNoteName(targetEndMidi)}`,
+      freq: Math.round(startFreq),
+      frequencyHz: startFreq,
+      midiNote: targetStartMidi,
+      startMidi: targetStartMidi,
+      endMidi: targetEndMidi,
+      startFrequencyHz: startFreq,
+      endFrequencyHz: endFreq,
+    });
   }
 
   /**
@@ -212,6 +262,7 @@ export class ScaleEngine {
     this.currentExercise = exerciseId;
     this.stepIndex = 0;
     this.baseKeyOffset = 0;
+    this.currentAttemptId = null;
 
     this.runLoopStep();
   }
@@ -225,23 +276,40 @@ export class ScaleEngine {
       case 'warmup_breathing': {
         // 4 counts inhale, 4 counts hold, 8 counts exhale (Total 16 beats)
         const beatInMeasure = this.stepIndex % 16;
+        const attemptId = this.ensureAttemptId();
         const isDownbeat = beatInMeasure === 0 || beatInMeasure === 4 || beatInMeasure === 8;
         this.playMetronomeClick(isDownbeat);
 
         let phaseText = 'Inhale (4s)';
+        let phase = 'inhale';
         if (beatInMeasure >= 4 && beatInMeasure < 8) phaseText = 'Hold Breath (4s)';
-        if (beatInMeasure >= 8) phaseText = 'Exhale "S" (8s)';
-
-        if (this.onNoteChangeCallback) {
-          this.onNoteChangeCallback({
-            noteName: `${phaseText} • Beat ${beatInMeasure + 1}/16`,
-            freq: 60 * this.speed,
-            midiNote: 48,
-          });
+        if (beatInMeasure >= 4 && beatInMeasure < 8) phase = 'hold';
+        if (beatInMeasure >= 8) {
+          phaseText = 'Exhale "S" (8s)';
+          phase = 'exhale';
         }
+
+        this.emitTarget({
+          eventType: 'target.started',
+          targetType: 'rhythm',
+          exerciseId: this.currentExercise,
+          attemptId,
+          startedAt: this.audioCtx.currentTime,
+          timelineStartedAtMs: getTimelineTimeMs(),
+          durationMs: Math.round(1000 / this.speed),
+          sequenceIndex: beatInMeasure,
+          sequenceLength: 16,
+          phase,
+          beat: beatInMeasure + 1,
+          noteName: `${phaseText} • Beat ${beatInMeasure + 1}/16`,
+          freq: null,
+          frequencyHz: null,
+          midiNote: null,
+        });
 
         stepDelayMs = 1000 / this.speed;
         this.stepIndex = (this.stepIndex + 1) % 16;
+        if (this.stepIndex === 0) this.currentAttemptId = null;
         break;
       }
 
@@ -251,15 +319,21 @@ export class ScaleEngine {
         const scaleIntervals = [0, 2, 4, 5, 7, 5, 4, 2, 0];
         const rootMidi = 60 + this.baseKeyOffset; // Starts at C4
         const noteOffset = scaleIntervals[this.stepIndex];
+        const attemptId = this.ensureAttemptId();
 
         const noteDuration = (0.45 / this.speed);
-        this.playSynthNote(rootMidi + noteOffset, noteDuration, 0.75);
+        this.playSynthNote(rootMidi + noteOffset, noteDuration, 0.75, {
+          attemptId,
+          sequenceIndex: this.stepIndex,
+          sequenceLength: scaleIntervals.length,
+        });
 
         this.stepIndex++;
         if (this.stepIndex >= scaleIntervals.length) {
           // Completed one scale repetition; transpose up by 1 semitone
           this.stepIndex = 0;
           this.baseKeyOffset = (this.baseKeyOffset + 1) % 7; // Ascend up to +7 semitones then reset
+          this.currentAttemptId = null;
           stepDelayMs = (800 / this.speed); // Brief breath pause between keys
         } else {
           stepDelayMs = (400 / this.speed);
@@ -271,14 +345,24 @@ export class ScaleEngine {
         // Continuous glissando siren sweep from A2 (45) to A4 (69) and back down
         const isUp = this.stepIndex % 2 === 0;
         const duration = 2.2 / this.speed;
+        const attemptId = this.ensureAttemptId();
 
         if (isUp) {
-          this.playGlissando(48, 72, duration); // C3 to C5
+          this.playGlissando(48, 72, duration, {
+            attemptId,
+            sequenceIndex: 0,
+            sequenceLength: 2,
+          }); // C3 to C5
         } else {
-          this.playGlissando(72, 48, duration); // C5 to C3
+          this.playGlissando(72, 48, duration, {
+            attemptId,
+            sequenceIndex: 1,
+            sequenceLength: 2,
+          }); // C5 to C3
         }
 
         this.stepIndex = (this.stepIndex + 1) % 2;
+        if (this.stepIndex === 0) this.currentAttemptId = null;
         stepDelayMs = (duration + 0.3) * 1000;
         break;
       }
@@ -293,28 +377,42 @@ export class ScaleEngine {
         ];
         const chordIndex = Math.floor(this.stepIndex / 4) % chords.length;
         const chordNotes = chords[chordIndex];
+        const attemptId = this.ensureAttemptId();
 
         // Play arpeggiated piano strum
         chordNotes.forEach((midi, i) => {
           const timeoutId = setTimeout(() => {
             this.scheduledTimeouts.delete(timeoutId);
             if (this.isPlaying) {
-              this.playSynthNote(midi, 1.2 / this.speed, 0.6);
+              this.playSynthNote(midi, 1.2 / this.speed, 0.6, {
+                attemptId,
+                sequenceIndex: chordIndex,
+                sequenceLength: chords.length,
+              });
             }
           }, i * 60);
           this.scheduledTimeouts.add(timeoutId);
         });
 
         const chordNames = ['C Major', 'G Major', 'A Minor', 'F Major'];
-        if (this.onNoteChangeCallback) {
-          this.onNoteChangeCallback({
-            noteName: `${chordNames[chordIndex]} (Chord Progression)`,
-            freq: Math.round(midiToFreq(chordNotes[0] + this.pitchShift)),
-            midiNote: chordNotes[0] + this.pitchShift,
-          });
-        }
+        this.emitTarget({
+          eventType: 'target.started',
+          targetType: 'chord',
+          exerciseId: this.currentExercise,
+          attemptId,
+          startedAt: this.audioCtx.currentTime,
+          timelineStartedAtMs: getTimelineTimeMs(),
+          durationMs: Math.round(1000 / this.speed),
+          sequenceIndex: chordIndex,
+          sequenceLength: chords.length,
+          noteName: `${chordNames[chordIndex]} (Chord Progression)`,
+          freq: Math.round(midiToFreq(chordNotes[0] + this.pitchShift)),
+          frequencyHz: midiToFreq(chordNotes[0] + this.pitchShift),
+          midiNote: chordNotes[0] + this.pitchShift,
+        });
 
         this.stepIndex = (this.stepIndex + 1) % (chords.length * 4);
+        if (this.stepIndex === 0) this.currentAttemptId = null;
         stepDelayMs = (1000 / this.speed);
         break;
       }
@@ -349,9 +447,8 @@ export class ScaleEngine {
       }
     }
     this.activeSources.clear();
-    if (this.onNoteChangeCallback) {
-      this.onNoteChangeCallback(null);
-    }
+    this.currentAttemptId = null;
+    this.emitTarget(null);
   }
 }
 

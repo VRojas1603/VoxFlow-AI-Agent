@@ -25,6 +25,8 @@ export function App() {
     isPlayingAccompaniment,
     toggleAccompaniment,
     currentNote,
+    pitchData,
+    pitchSignalQuality,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,
@@ -137,9 +139,10 @@ export function App() {
           <div className="lg:col-span-5 flex flex-col gap-5">
             {/* Real-time Vocal Pitch & Tuning Gauge */}
             <PitchMonitor
-              getMicAnalyser={getMicAnalyser}
               isListening={isListening}
               targetNote={currentNote}
+              pitchData={pitchData}
+              signalQuality={pitchSignalQuality}
             />
 
             <TranscriptView conversation={conversation} />

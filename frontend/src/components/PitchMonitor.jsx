@@ -1,54 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { autoCorrelate } from '../audio/pitchDetector';
+import React from 'react';
 import { Target, Music, Mic, CheckCircle2, AlertCircle } from 'lucide-react';
 
-export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
-  const [pitchData, setPitchData] = useState(null);
-  const animFrameRef = useRef(null);
-  const timeDataRef = useRef(new Float32Array(1024));
-
-  useEffect(() => {
-    if (!isListening || !getMicAnalyser) {
-      return undefined;
-    }
-
-    const checkPitch = () => {
-      const analyser = getMicAnalyser();
-      if (analyser) {
-        // Enforce larger fftSize for accurate pitch detection if needed
-        if (analyser.fftSize < 1024) {
-          analyser.fftSize = 1024;
-        }
-        if (timeDataRef.current.length !== analyser.fftSize) {
-          timeDataRef.current = new Float32Array(analyser.fftSize);
-        }
-
-        analyser.getFloatTimeDomainData(timeDataRef.current);
-        const sampleRate = analyser.context?.sampleRate || 24000;
-        const result = autoCorrelate(timeDataRef.current, sampleRate);
-
-        if (result) {
-          setPitchData(result);
-        } else {
-          // Slowly decay if no voice is detected
-          setPitchData((prev) => (prev ? { ...prev, isDecaying: true } : null));
-        }
-      }
-
-      animFrameRef.current = requestAnimationFrame(checkPitch);
-    };
-
-    animFrameRef.current = requestAnimationFrame(checkPitch);
-
-    return () => {
-      if (animFrameRef.current) {
-        cancelAnimationFrame(animFrameRef.current);
-      }
-    };
-  }, [getMicAnalyser, isListening]);
-
+export function PitchMonitor({ isListening, targetNote, pitchData, signalQuality }) {
   const visiblePitchData = isListening ? pitchData : null;
-  const cents = visiblePitchData?.cents || 0;
+  const cents = visiblePitchData?.cents ?? 0;
   // Map cents (-50 to +50) to percentage (0% to 100%)
   const meterPercent = Math.max(0, Math.min(100, ((cents + 50) / 100) * 100));
 
@@ -94,7 +49,8 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
             </span>
           ) : (
             <span className="text-[11px] text-slate-400 flex items-center gap-1">
-              <Mic className="w-3 h-3 text-cyan-400 animate-pulse" /> Sing to detect pitch
+              <Mic className="w-3 h-3 text-cyan-400 animate-pulse" />
+              {signalQuality === 'unclear' ? 'Signal is unclear' : 'Sing to detect pitch'}
             </span>
           )
         ) : (

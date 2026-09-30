@@ -12,6 +12,7 @@ import {
   upsertCoveredTip,
 } from '../audio/exerciseControls';
 import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
+import { usePitchTracking } from './usePitchTracking';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -81,14 +82,25 @@ export function useVoiceAgent() {
   const volumeChangesCountRef = useRef(0);
   const processedToolCallsRef = useRef(new Map());
 
+  const {
+    pitchData,
+    signalQuality: pitchSignalQuality,
+    latestPitchSampleRef,
+    latestPitchAnalysisRef,
+  } = usePitchTracking({
+    analyserRef: micAnalyserRef,
+    enabled: isListening && !isSpeaking,
+  });
+
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
     pcmPlayerRef.current = new StreamingPCMPlayer(24000);
-    scaleEngine.onNoteChange((noteInfo) => {
+    const unsubscribeTarget = scaleEngine.onTargetChange((noteInfo) => {
       setCurrentNote(noteInfo);
     });
 
     return () => {
+      unsubscribeTarget();
       pcmPlayerRef.current?.close();
       scaleEngine.stop();
     };
@@ -649,6 +661,11 @@ export function useVoiceAgent() {
     isPlayingAccompaniment,
     toggleAccompaniment,
     currentNote,
+    currentTarget: currentNote,
+    pitchData,
+    pitchSignalQuality,
+    latestPitchSampleRef,
+    latestPitchAnalysisRef,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,

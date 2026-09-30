@@ -1,115 +1,113 @@
-/**
- * Real-time Vocal Pitch Detector using Autocorrelation with Parabolic Peak Interpolation.
- * Optimized for human vocal range (C2: 65 Hz to C6: 1046 Hz).
- */
+import { PitchDetector } from 'pitchy';
 
-const NOTE_STRINGS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-export function freqToNote(freq) {
-  const midi = 69 + 12 * Math.log2(freq / 440);
-  const roundedMidi = Math.round(midi);
-  const cents = Math.round((midi - roundedMidi) * 100);
-  const noteIndex = ((roundedMidi % 12) + 12) % 12;
-  const octave = Math.floor(roundedMidi / 12) - 1;
-  const noteName = `${NOTE_STRINGS[noteIndex]}${octave}`;
+export const DEFAULT_PITCH_TRACKING_CONFIG = Object.freeze({
+  inputLength: 2048,
+  minimumFrequencyHz: 65,
+  maximumFrequencyHz: 1100,
+  minimumClarity: 0.85,
+  minimumRms: 0.015,
+});
+
+export function calculateRms(buffer) {
+  if (!buffer?.length) return 0;
+
+  let sumOfSquares = 0;
+  for (let index = 0; index < buffer.length; index += 1) {
+    sumOfSquares += buffer[index] * buffer[index];
+  }
+
+  return Math.sqrt(sumOfSquares / buffer.length);
+}
+
+export function frequencyToPitch(frequencyHz) {
+  const midiFloat = 69 + 12 * Math.log2(frequencyHz / 440);
+  const midi = Math.round(midiFloat);
+  const cents = Math.round((midiFloat - midi) * 100);
+  const noteIndex = ((midi % 12) + 12) % 12;
+  const octave = Math.floor(midi / 12) - 1;
 
   return {
-    midi: roundedMidi,
-    noteName,
-    cents, // -50 to +50 cents
+    midi,
+    midiFloat,
+    noteName: `${NOTE_NAMES[noteIndex]}${octave}`,
+    cents,
     isSharp: cents > 10,
     isFlat: cents < -10,
     isInTune: Math.abs(cents) <= 10,
   };
 }
 
-/**
- * Autocorrelation algorithm to extract fundamental frequency f0 from time-domain audio buffer.
- */
-export function autoCorrelate(buffer, sampleRate = 24000) {
-  const SIZE = buffer.length;
+// Backward-compatible export for existing imports and external callers.
+export const freqToNote = frequencyToPitch;
 
-  // 1. Calculate Root Mean Square (RMS) energy to filter out silence/background noise
-  let sumOfSquares = 0;
-  for (let i = 0; i < SIZE; i++) {
-    const val = buffer[i];
-    sumOfSquares += val * val;
-  }
-  const rms = Math.sqrt(sumOfSquares / SIZE);
+export function createPitchAnalyzer(overrides = {}) {
+  const config = {
+    ...DEFAULT_PITCH_TRACKING_CONFIG,
+    ...overrides,
+  };
+  const detector = PitchDetector.forFloat32Array(config.inputLength);
 
-  // If too quiet, ignore as silence
-  if (rms < 0.02) {
-    return null;
-  }
+  return {
+    inputLength: config.inputLength,
 
-  // 2. Trim low-level silence at boundaries
-  let r1 = 0;
-  let r2 = SIZE - 1;
-  const threshold = 0.2;
-  for (let i = 0; i < SIZE / 2; i++) {
-    if (Math.abs(buffer[i]) < threshold) {
-      r1 = i;
-      break;
-    }
-  }
-  for (let i = 1; i < SIZE / 2; i++) {
-    if (Math.abs(buffer[SIZE - i]) < threshold) {
-      r2 = SIZE - i;
-      break;
-    }
-  }
+    analyze(buffer, sampleRate = 24000, options = {}) {
+      if (!(buffer instanceof Float32Array) || buffer.length !== config.inputLength) {
+        throw new TypeError(`Pitch analysis requires a Float32Array of ${config.inputLength} samples.`);
+      }
 
-  const trimmedBuffer = buffer.slice(r1, r2);
-  const c = new Float32Array(trimmedBuffer.length);
+      const rms = calculateRms(buffer);
+      const minimumRms = Math.max(config.minimumRms, options.minimumRms || 0);
 
-  // 3. Autocorrelation over lags
-  for (let i = 0; i < trimmedBuffer.length; i++) {
-    for (let j = 0; j < trimmedBuffer.length - i; j++) {
-      c[i] = c[i] + trimmedBuffer[j] * trimmedBuffer[j + i];
-    }
-  }
+      if (rms < minimumRms) {
+        return {
+          sample: null,
+          signalQuality: 'quiet',
+          rms,
+          clarity: 0,
+        };
+      }
 
-  // 4. Find the first dip
-  let d = 0;
-  while (c[d] > c[d + 1]) {
-    d++;
-  }
+      const [frequencyHz, clarity] = detector.findPitch(buffer, sampleRate);
 
-  // 5. Find the maximum correlation peak after the dip
-  let maxval = -1;
-  let maxpos = -1;
-  for (let i = d; i < trimmedBuffer.length; i++) {
-    if (c[i] > maxval) {
-      maxval = c[i];
-      maxpos = i;
-    }
-  }
+      if (!Number.isFinite(frequencyHz) || frequencyHz <= 0 || clarity < config.minimumClarity) {
+        return {
+          sample: null,
+          signalQuality: 'unclear',
+          rms,
+          clarity: Number.isFinite(clarity) ? clarity : 0,
+        };
+      }
 
-  let T0 = maxpos;
+      if (
+        frequencyHz < config.minimumFrequencyHz
+        || frequencyHz > config.maximumFrequencyHz
+      ) {
+        return {
+          sample: null,
+          signalQuality: 'out_of_range',
+          rms,
+          clarity,
+        };
+      }
 
-  // 6. Parabolic peak interpolation for sub-sample precision
-  if (T0 > 0 && T0 < trimmedBuffer.length - 1) {
-    const x1 = c[T0 - 1];
-    const x2 = c[T0];
-    const x3 = c[T0 + 1];
-    const a = (x1 + x3 - 2 * x2) / 2;
-    const b = (x3 - x1) / 2;
-    if (a) {
-      T0 = T0 - b / (2 * a);
-    }
-  }
-
-  const freq = sampleRate / T0;
-
-  // Filter vocal range (approx 65 Hz to 1100 Hz)
-  if (freq >= 65 && freq <= 1100) {
-    const noteInfo = freqToNote(freq);
-    return {
-      freq: Math.round(freq * 10) / 10,
-      rms: Math.round(rms * 100) / 100,
-      ...noteInfo,
-    };
-  }
-
-  return null;
+      const pitch = frequencyToPitch(frequencyHz);
+      return {
+        signalQuality: 'valid',
+        rms,
+        clarity,
+        sample: {
+          audioTime: options.audioTime ?? null,
+          capturedAtMs: options.capturedAtMs ?? null,
+          frequencyHz,
+          freq: Math.round(frequencyHz * 10) / 10,
+          rms,
+          clarity,
+          signalQuality: 'valid',
+          ...pitch,
+        },
+      };
+    },
+  };
 }

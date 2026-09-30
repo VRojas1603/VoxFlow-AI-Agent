@@ -3,6 +3,36 @@ import test from 'node:test';
 
 import { ScaleEngine } from '../src/audio/scaleEngine.js';
 
+function createAudioParam() {
+  return {
+    setValueAtTime() {},
+    linearRampToValueAtTime() {},
+    exponentialRampToValueAtTime() {},
+  };
+}
+
+function createAudioNode() {
+  return {
+    frequency: createAudioParam(),
+    gain: createAudioParam(),
+    connect() {},
+    addEventListener() {},
+    start() {},
+    stop() {},
+  };
+}
+
+function attachFakeAudioContext(engine) {
+  engine.audioCtx = {
+    state: 'running',
+    currentTime: 12.5,
+    createOscillator: createAudioNode,
+    createGain: createAudioNode,
+    createBiquadFilter: createAudioNode,
+  };
+  engine.masterGain = createAudioNode();
+}
+
 test('stop cancels playback timers and active audio sources', () => {
   const engine = new ScaleEngine();
   let noteChange = 'not-cleared';
@@ -42,4 +72,58 @@ test('stop remains safe when an audio source already ended', () => {
 
   assert.doesNotThrow(() => engine.stop());
   assert.equal(engine.activeSources.size, 0);
+});
+
+test('emits synchronized note targets with attempt and sequence metadata', () => {
+  const engine = new ScaleEngine();
+  attachFakeAudioContext(engine);
+  engine.currentExercise = 'warmup_lip_trill';
+  engine.pitchShift = -2;
+  let target = null;
+  const unsubscribe = engine.onTargetChange((nextTarget) => {
+    target = nextTarget;
+  });
+
+  engine.playSynthNote(60, 0.45, 0.75, {
+    attemptId: 'lip-trill-1',
+    sequenceIndex: 3,
+    sequenceLength: 9,
+  });
+
+  assert.equal(target.eventType, 'target.started');
+  assert.equal(target.targetType, 'note');
+  assert.equal(target.exerciseId, 'warmup_lip_trill');
+  assert.equal(target.attemptId, 'lip-trill-1');
+  assert.equal(target.startedAt, 12.5);
+  assert.ok(Number.isFinite(target.timelineStartedAtMs));
+  assert.equal(target.durationMs, 450);
+  assert.equal(target.sequenceIndex, 3);
+  assert.equal(target.sequenceLength, 9);
+  assert.equal(target.noteName, 'A#3');
+  assert.equal(target.midiNote, 58);
+
+  unsubscribe();
+});
+
+test('emits glide targets with direction and frequency boundaries', () => {
+  const engine = new ScaleEngine();
+  attachFakeAudioContext(engine);
+  engine.currentExercise = 'warmup_sirens';
+  let target = null;
+  engine.onTargetChange((nextTarget) => {
+    target = nextTarget;
+  });
+
+  engine.playGlissando(48, 72, 2.2, {
+    attemptId: 'siren-1',
+    sequenceIndex: 0,
+    sequenceLength: 2,
+  });
+
+  assert.equal(target.targetType, 'glide');
+  assert.equal(target.direction, 'up');
+  assert.equal(target.startMidi, 48);
+  assert.equal(target.endMidi, 72);
+  assert.equal(target.durationMs, 2200);
+  assert.ok(target.endFrequencyHz > target.startFrequencyHz);
 });
