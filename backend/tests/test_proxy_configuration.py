@@ -69,11 +69,14 @@ class ProxyConfigurationTests(unittest.TestCase):
     def test_accompaniment_adjustment_distinguishes_relative_and_absolute_changes(self):
         tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "adjust_accompaniment")
         properties = tool["parameters"]["properties"]
+        prompt = get_session_update_payload()["session"]["system_prompt"]
 
         self.assertEqual(tool["parameters"]["required"], ["control", "operation"])
         self.assertEqual(properties["control"]["enum"], ["pitch", "speed", "volume"])
         self.assertEqual(properties["operation"]["enum"], ["increase", "decrease", "set"])
         self.assertNotIn("adjust_music_playback", {tool["name"] for tool in VOICE_TOOLS})
+        self.assertIn("increase the volume a little bit", prompt)
+        self.assertIn("louder, quieter, softer", tool["description"])
 
     def test_tip_guidance_requires_an_explicit_request(self):
         session = get_session_update_payload()["session"]
@@ -90,6 +93,7 @@ class ProxyConfigurationTests(unittest.TestCase):
 
         self.assertIn("stops the current accompaniment", tool["description"])
         self.assertIn("Do not show a new tip", tool["description"])
+        self.assertIn("Do not mention playback unless", tool["response_instructions"]["success"])
 
     def test_proxy_validates_voice_and_derives_language(self):
         self.assertEqual(resolve_voice_config("LOLA"), ("lola", "es"))

@@ -37,6 +37,8 @@ Core Language & Code-Switching Rules:
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
    - For relative requests such as "raise it by 2" or "make it slower", call 'adjust_accompaniment' with operation 'increase' or 'decrease'. For target requests such as "set it to 0" or "back to 1x", use operation 'set'.
    - If the user gives no amount, use 1 semitone for pitch, 0.15 for speed, or 10 percentage points for volume.
+   - Treat every request to make the accompaniment, track, scale, or music louder, quieter, softer, or to turn its volume up or down as an 'adjust_accompaniment' volume request. The app can control accompaniment volume, so never redirect the user to device volume controls.
+   - Example: "increase the volume a little bit" means control 'volume', operation 'increase', value 10. "Turn it down" means control 'volume', operation 'decrease', value 10.
 8. Explicit visual guidance only:
    - Invoke 'show_vocal_tip' only when the user explicitly asks how to perform a technique, requests an explanation or instructions, or asks to see a guide.
    - Do NOT invoke 'show_vocal_tip' merely because an exercise was selected, introduced, or changed.
@@ -44,6 +46,7 @@ Core Language & Code-Switching Rules:
 9. Tool narration: When the user requests technique guidance, call 'show_vocal_tip' and speak its explanation aloud in the same turn. Never show a silent replacement tip.
 10. Exercise transitions:
    - When the user only asks to move to another exercise, call 'select_exercise' without 'show_vocal_tip'. The selection stops the current accompaniment.
+   - Confirm the newly selected exercise without announcing that playback was stopped unless the user explicitly asked to stop it.
    - If one request both selects an exercise and asks how to perform it, call 'select_exercise' and 'show_vocal_tip' in that same turn, then explain it aloud.
    - Examples that require a spoken tip: "How do I do a lip trill?", "Explain the current exercise", and "How can I do this properly?"
 11. Non-Word Vocalizations & Singing Practice:
@@ -129,7 +132,7 @@ VOICE_TOOLS = [
     {
         "type": "function",
         "name": "adjust_accompaniment",
-        "description": "Adjusts one accompaniment control. Use increase/decrease for relative requests and set for an absolute target. Pitch values are semitones, speed values are playback factors, and volume values are percentages from 0 to 100.",
+        "description": "Adjusts pitch, speed, or volume for the accompaniment, track, scale, or music. Always use this tool for louder, quieter, softer, volume up, and volume down requests; the app directly controls accompaniment volume. Use increase/decrease for relative requests and set for an absolute target. Pitch values are semitones, speed values are playback factors, and volume values are percentages from 0 to 100.",
         "response_instructions": {
             "success": "Confirm the actual control and current value reported by the tool result in one short sentence.",
             "error": "Briefly say that the playback change could not be applied.",
@@ -140,7 +143,7 @@ VOICE_TOOLS = [
                 "control": {
                     "type": "string",
                     "enum": ["pitch", "speed", "volume"],
-                    "description": "The accompaniment setting to change.",
+                    "description": "The accompaniment setting to change. Use volume for louder, quieter, softer, turn up, and turn down requests.",
                 },
                 "operation": {
                     "type": "string",
@@ -161,7 +164,7 @@ VOICE_TOOLS = [
         "name": "select_exercise",
         "description": "Selects the active warm-up exercise, stops the current accompaniment, and clears any previous tip card. Do not show a new tip unless the user also asks for guidance.",
         "response_instructions": {
-            "success": "Confirm the selected exercise and that playback is stopped. Do not explain the technique unless the user requested guidance.",
+            "success": "Confirm only the selected exercise in one short sentence. Do not mention playback unless the user explicitly asked to stop it, and do not explain the technique unless the user requested guidance.",
             "error": "Briefly say that the exercise could not be selected.",
         },
         "parameters": {
@@ -180,7 +183,7 @@ VOICE_TOOLS = [
         "name": "end_session",
         "description": "Ends the current vocal coaching session after the user says goodbye or asks to stop.",
         "response_instructions": {
-            "success": "Say one brief farewell before ending the session.",
+            "success": "Do not speak again because the farewell was already delivered before this tool completed.",
             "error": "Say one brief farewell and ask the user to end the session manually.",
         },
         "parameters": {

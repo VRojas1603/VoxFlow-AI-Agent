@@ -23,15 +23,26 @@ def resolve_voice_config(requested_voice: str | None) -> tuple[str, str]:
 async def finish_tool_reply(
     tool_coordinator: ToolCallCoordinator,
     send_to_aai,
+    send_to_client,
     *,
     pending_end_session: bool,
     interrupted: bool,
 ) -> bool:
-    """Finish tool calls and end billing only after a completed farewell reply."""
+    """Finish tool calls and request a playback drain after a completed farewell."""
     await tool_coordinator.finish_reply(interrupted=interrupted)
     if pending_end_session and not interrupted:
-        await send_to_aai({"type": "session.end"})
-        logger.info("Sent session.end after completed farewell")
+        await send_to_client({"type": "proxy.playback_drain_requested"})
+        logger.info("Waiting for client playback to finish before ending session")
+        return True
+    return False
+
+
+async def finish_end_session(send_to_aai, *, pending_end_session: bool) -> bool:
+    """End the upstream session after the client confirms playback is drained."""
+    if not pending_end_session:
+        return False
+    await send_to_aai({"type": "session.end"})
+    logger.info("Sent session.end after client playback finished")
     return False
 
 
@@ -74,6 +85,10 @@ async def handle_agent_proxy(client_ws: WebSocket):
                 async with aai_send_lock:
                     await aai_ws.send(message)
 
+            async def send_to_client(payload):
+                message = json.dumps(payload) if isinstance(payload, dict) else payload
+                await client_ws.send_text(message)
+
             tool_coordinator = ToolCallCoordinator(send_to_aai, logger=logger)
             pending_end_session = False
 
@@ -91,6 +106,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
 
             # Task: Forward stream from web client to AssemblyAI
             async def forward_client_to_aai():
+                nonlocal pending_end_session
                 try:
                     while True:
                         data = await client_ws.receive()
@@ -115,6 +131,15 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                     )
                                 else:
                                     logger.warning("Ignoring client.tool_result without call_id")
+                                continue
+
+                            if isinstance(event, dict) and event.get("type") == "client.playback_drained":
+                                if event.get("timed_out"):
+                                    logger.warning("Client playback drain timed out before session end")
+                                pending_end_session = await finish_end_session(
+                                    send_to_aai,
+                                    pending_end_session=pending_end_session,
+                                )
                                 continue
 
                             await send_to_aai(text)
@@ -173,6 +198,7 @@ async def handle_agent_proxy(client_ws: WebSocket):
                                     pending_end_session = await finish_tool_reply(
                                         tool_coordinator,
                                         send_to_aai,
+                                        send_to_client,
                                         pending_end_session=pending_end_session,
                                         interrupted=(
                                             event.get("status") == "interrupted"

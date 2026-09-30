@@ -536,6 +536,18 @@ export function useVoiceAgent() {
             return;
           }
 
+          // Wait until the farewell audio queue is empty before ending the upstream session.
+          if (eventType === 'proxy.playback_drain_requested') {
+            const drainResult = await pcmPlayerRef.current?.waitForIdle();
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'client.playback_drained',
+                timed_out: Boolean(drainResult?.timedOut),
+              }));
+            }
+            return;
+          }
+
           if (eventType === 'session.ready') {
             console.log('Voice Agent session ready for audio streaming');
             await startMicrophone(ws);

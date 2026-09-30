@@ -2,7 +2,7 @@ import asyncio
 import unittest
 
 from app.services.tool_coordinator import ToolCallCoordinator
-from app.services.assemblyai_proxy import finish_tool_reply
+from app.services.assemblyai_proxy import finish_end_session, finish_tool_reply
 
 
 class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
@@ -79,19 +79,30 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_end_session_is_sent_after_tool_result(self):
         self.coordinator.register("call-7", "end_session", {})
         self.coordinator.set_client_result("call-7", {"status": "success", "applied": True})
+        client_events = []
+
+        async def capture_client(event):
+            client_events.append(event)
 
         pending = await finish_tool_reply(
             self.coordinator,
             self.capture,
+            capture_client,
             pending_end_session=True,
             interrupted=False,
         )
 
-        self.assertFalse(pending)
-        self.assertEqual(
-            [event["type"] for event in self.sent],
-            ["tool.result", "session.end"],
+        self.assertTrue(pending)
+        self.assertEqual([event["type"] for event in self.sent], ["tool.result"])
+        self.assertEqual(client_events, [{"type": "proxy.playback_drain_requested"}])
+
+        pending = await finish_end_session(
+            self.capture,
+            pending_end_session=pending,
         )
+
+        self.assertFalse(pending)
+        self.assertEqual([event["type"] for event in self.sent], ["tool.result", "session.end"])
 
     async def test_interrupted_farewell_does_not_end_session(self):
         self.coordinator.register("call-8", "end_session", {})
@@ -99,8 +110,18 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         pending = await finish_tool_reply(
             self.coordinator,
             self.capture,
+            self.capture,
             pending_end_session=True,
             interrupted=True,
+        )
+
+        self.assertFalse(pending)
+        self.assertEqual(self.sent, [])
+
+    async def test_playback_confirmation_without_pending_end_is_ignored(self):
+        pending = await finish_end_session(
+            self.capture,
+            pending_end_session=False,
         )
 
         self.assertFalse(pending)
