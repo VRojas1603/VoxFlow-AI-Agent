@@ -15,6 +15,7 @@ import {
   Radio,
   Sparkles,
 } from 'lucide-react';
+import { NotesPracticePanel } from './NotesPracticePanel';
 
 const EXERCISES = [
   {
@@ -42,11 +43,11 @@ const EXERCISES = [
     icon: Activity,
   },
   {
-    id: 'song_practice',
-    name: 'Free Song Practice',
-    category: 'Repertoire',
-    duration: '5 min',
-    desc: 'Looping acoustic piano chord progression with real-time feedback.',
+    id: 'notes_practice',
+    name: 'Notes Practice',
+    category: 'Pitch Control',
+    duration: '3 min',
+    desc: 'Match four target notes in order using live pitch feedback.',
     icon: Music2,
   },
 ];
@@ -56,15 +57,23 @@ export function ExerciseSelector({
   onSelectExercise,
   playbackSettings,
   isPlayingAccompaniment,
+  accompanimentStart,
   onToggleAccompaniment,
   currentNote,
   accompanimentVolume = 0.4,
   onVolumeChange,
   onPitchAdjust,
   onSpeedAdjust,
+  notesPractice,
+  disabled = false,
 }) {
   const pitchShift = playbackSettings?.pitchShift || 0;
   const speed = playbackSettings?.speed || 1.0;
+  const isStartPending = (
+    accompanimentStart?.phase === 'countdown'
+    || accompanimentStart?.phase === 'waiting_for_voice'
+  );
+  const isNotesPractice = activeExercise === 'notes_practice';
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur-sm flex flex-col gap-4">
@@ -84,8 +93,8 @@ export function ExerciseSelector({
         <div className="flex items-center gap-2 text-xs bg-slate-800/80 px-2.5 py-1 rounded-lg text-purple-300 border border-purple-500/20">
           <Sliders className="w-3.5 h-3.5 text-purple-400" />
           <span>Key: {pitchShift >= 0 ? `+${pitchShift}` : pitchShift} st</span>
-          <span>•</span>
-          <span>Speed: {speed}x</span>
+          {!isNotesPractice && <span>•</span>}
+          {!isNotesPractice && <span>Speed: {speed}x</span>}
         </div>
       </div>
 
@@ -98,8 +107,9 @@ export function ExerciseSelector({
           return (
             <button
               key={ex.id}
+              disabled={disabled}
               onClick={() => onSelectExercise(ex.id)}
-              className={`p-3.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between ${
+              className={`p-3.5 rounded-xl text-left border transition-all cursor-pointer disabled:cursor-not-allowed flex flex-col justify-between ${
                 isActive
                   ? 'bg-purple-900/30 border-purple-500/50 shadow-lg shadow-purple-950/20'
                   : 'bg-slate-900/40 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40'
@@ -132,15 +142,25 @@ export function ExerciseSelector({
         })}
       </div>
 
-      {/* Interactive Scale Accompaniment & Reference Player Bar */}
+      {isNotesPractice ? (
+        <NotesPracticePanel
+          practice={notesPractice}
+          startState={accompanimentStart}
+          pitchShift={pitchShift}
+          onToggle={onToggleAccompaniment}
+          onPitchAdjust={onPitchAdjust}
+          disabled={disabled}
+        />
+      ) : (
       <div className="rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/60 to-slate-900/40 p-3.5 flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Play/Stop Button & Live Note Status */}
           <div className="flex items-center gap-3">
             <button
+              disabled={disabled}
               onClick={onToggleAccompaniment}
-              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-md ${
-                isPlayingAccompaniment
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 shadow-md ${
+                isPlayingAccompaniment || isStartPending
                   ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
                   : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:from-purple-500 hover:to-pink-500 shadow-purple-600/20'
               }`}
@@ -148,6 +168,10 @@ export function ExerciseSelector({
               {isPlayingAccompaniment ? (
                 <>
                   <Square className="w-3.5 h-3.5 fill-current" /> Stop Scale
+                </>
+              ) : isStartPending ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" /> Cancel Start
                 </>
               ) : (
                 <>
@@ -158,7 +182,17 @@ export function ExerciseSelector({
 
             {/* Live Playing Note Pill */}
             <div className="flex items-center gap-2">
-              {isPlayingAccompaniment && currentNote ? (
+              {accompanimentStart?.phase === 'countdown' ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs font-medium animate-pulse">
+                  <Radio className="w-3 h-3 text-amber-400" />
+                  <span>Starting in {accompanimentStart.secondsRemaining}</span>
+                </div>
+              ) : accompanimentStart?.phase === 'waiting_for_voice' ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-200 text-xs font-medium animate-pulse">
+                  <Radio className="w-3 h-3 text-sky-400" />
+                  <span>Waiting for Lyra</span>
+                </div>
+              ) : isPlayingAccompaniment && currentNote ? (
                 <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/20 border border-purple-500/40 text-purple-200 text-xs font-medium animate-pulse">
                   <Radio className="w-3 h-3 text-purple-400 animate-spin" />
                   <span className="font-semibold">{currentNote.noteName}</span>
@@ -180,8 +214,9 @@ export function ExerciseSelector({
             <div className="flex items-center gap-1 bg-slate-800/80 border border-slate-700/60 rounded-lg p-1 text-xs">
               <span className="text-[11px] text-slate-400 px-1">Key:</span>
               <button
+                disabled={disabled}
                 onClick={() => onPitchAdjust && onPitchAdjust(-1)}
-                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 title="Transpose down 1 semitone"
               >
                 <Minus className="w-3 h-3" />
@@ -190,8 +225,9 @@ export function ExerciseSelector({
                 {pitchShift >= 0 ? `+${pitchShift}` : pitchShift}
               </span>
               <button
+                disabled={disabled}
                 onClick={() => onPitchAdjust && onPitchAdjust(1)}
-                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-1 rounded hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 title="Transpose up 1 semitone"
               >
                 <Plus className="w-3 h-3" />
@@ -204,8 +240,9 @@ export function ExerciseSelector({
               {[0.85, 1.0, 1.15].map((spd) => (
                 <button
                   key={spd}
+                  disabled={disabled}
                   onClick={() => onSpeedAdjust && onSpeedAdjust(spd)}
-                  className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer ${
+                  className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${
                     speed === spd
                       ? 'bg-purple-600 text-white'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700'
@@ -224,6 +261,7 @@ export function ExerciseSelector({
                 <VolumeX className="w-3.5 h-3.5 text-rose-400" />
               )}
               <input
+                disabled={disabled}
                 type="range"
                 min="0"
                 max="1"
@@ -237,6 +275,7 @@ export function ExerciseSelector({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

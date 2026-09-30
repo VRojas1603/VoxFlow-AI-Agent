@@ -47,6 +47,22 @@ test('selecting the active exercise still stops playback safely', () => {
   assert.equal(result.applied, true);
 });
 
+test('selects Notes Practice with its public exercise name', () => {
+  const engine = {
+    currentExercise: 'warmup_sirens',
+    isPlaying: false,
+    stop() {},
+    setExercise(exerciseId) {
+      this.currentExercise = exerciseId;
+    },
+  };
+
+  const result = applyExerciseSelection(engine, 'notes_practice');
+
+  assert.equal(result.exercise_name, 'Notes Practice');
+  assert.equal(engine.currentExercise, 'notes_practice');
+});
+
 test('rejects unknown exercises', () => {
   assert.throws(
     () => applyExerciseSelection({}, 'unknown'),

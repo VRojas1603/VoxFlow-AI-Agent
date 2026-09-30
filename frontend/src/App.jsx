@@ -6,8 +6,9 @@ import { TipCard } from './components/TipCard';
 import { ExerciseSelector } from './components/ExerciseSelector';
 import { TranscriptView } from './components/TranscriptView';
 import { PitchMonitor } from './components/PitchMonitor';
-import { SessionSummaryModal } from './components/SessionSummaryModal';
-import { AlertTriangle, Sparkles, Info, Globe2 } from 'lucide-react';
+import { SessionReportLoading } from './components/SessionReportLoading';
+import { SessionReportPanel } from './components/SessionReportPanel';
+import { AlertTriangle, Sparkles, Info, Globe2, LockKeyhole } from 'lucide-react';
 
 export function App() {
   const {
@@ -23,17 +24,22 @@ export function App() {
     activeExercise,
     setActiveExercise,
     isPlayingAccompaniment,
+    accompanimentStart,
     toggleAccompaniment,
     currentNote,
+    pitchData,
+    pitchSignalQuality,
+    notesPractice,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,
     adjustSpeedManually,
     getMicAnalyser,
     getPlayerAnalyser,
-    isSummaryOpen,
-    summaryStats,
-    closeSummary,
+    sessionView,
+    reportGenerationStep,
+    sessionReport,
+    setUpNewSession,
     sessionSeconds,
     errorMessage,
     selectedVoice,
@@ -51,6 +57,19 @@ export function App() {
     setActiveTip(null);
   };
 
+  const isSessionReview = !['voice', 'voice_setup'].includes(sessionView);
+  const isVoicePanel = (
+    sessionView === 'voice'
+    || sessionView === 'voice_setup'
+    || sessionView === 'voice_exiting'
+  );
+  const isLoadingPanel = (
+    sessionView === 'generating_report' || sessionView === 'loading_exiting'
+  );
+  const isReportPanel = (
+    sessionView === 'report_ready' || sessionView === 'returning_to_setup'
+  );
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Navigation Bar */}
@@ -62,6 +81,8 @@ export function App() {
         onVoiceChange={selectVoice}
         voiceProfile={voiceProfile}
         sessionSeconds={sessionSeconds}
+        isSessionReview={isSessionReview}
+        sessionView={sessionView}
       />
 
       {/* Error notification banner if any */}
@@ -82,18 +103,38 @@ export function App() {
           <div className="absolute top-0 left-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-pink-600/10 rounded-full blur-3xl pointer-events-none" />
 
-          <VoiceOrb
-            status={status}
-            isSpeaking={isSpeaking}
-            isListening={isListening}
-            agentTranscript={agentTranscript}
-            userTranscript={userTranscript}
-            getMicAnalyser={getMicAnalyser}
-            getPlayerAnalyser={getPlayerAnalyser}
-          />
+          {isVoicePanel && (
+            <div className={sessionView === 'voice_exiting' ? 'animate-slide-out-right' : 'animate-slide-in-left'}>
+              <VoiceOrb
+                status={status}
+                isSpeaking={isSpeaking}
+                isListening={isListening}
+                agentTranscript={sessionView === 'voice_setup' ? '' : agentTranscript}
+                userTranscript={sessionView === 'voice_setup' ? '' : userTranscript}
+                getMicAnalyser={getMicAnalyser}
+                getPlayerAnalyser={getPlayerAnalyser}
+              />
+            </div>
+          )}
+
+          {isLoadingPanel && (
+            <div className={sessionView === 'loading_exiting' ? 'animate-slide-out-right' : 'animate-slide-in-left'}>
+              <SessionReportLoading activeStep={reportGenerationStep} />
+            </div>
+          )}
+
+          {isReportPanel && sessionReport && (
+            <div className={sessionView === 'returning_to_setup' ? 'animate-slide-out-right' : 'animate-slide-in-left'}>
+              <SessionReportPanel
+                report={sessionReport}
+                onSetUpNewSession={setUpNewSession}
+                actionsDisabled={sessionView === 'returning_to_setup'}
+              />
+            </div>
+          )}
 
           {/* Prompt suggestions when connected */}
-          {status === 'connected' && (
+          {status === 'connected' && sessionView === 'voice' && (
             <div className="mt-4 pt-4 border-t border-slate-800/60 flex flex-wrap items-center justify-center gap-2 text-xs text-slate-400">
               <span className="flex items-center gap-1 font-medium text-slate-300">
                 <Sparkles className="w-3.5 h-3.5 text-purple-400" /> Try saying:
@@ -112,7 +153,14 @@ export function App() {
         </section>
 
         {/* Two-column Interactive Dashboard */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {isSessionReview && (
+          <div className="flex items-center justify-center gap-2 rounded-xl border border-purple-500/20 bg-purple-500/5 px-4 py-2.5 text-xs text-purple-200">
+            <LockKeyhole className="w-3.5 h-3.5" />
+            Session controls are locked while you review the completed session.
+          </div>
+        )}
+
+        <div className={`grid grid-cols-1 lg:grid-cols-12 gap-6 transition-opacity duration-300 ${isSessionReview ? 'opacity-60' : ''}`}>
           {/* Left Column: Vocal Tips & Routine (7 cols) */}
           <div className="lg:col-span-7 flex flex-col gap-5">
             {/* Vocal Technique Tip Card (Tool Call from AssemblyAI) */}
@@ -124,12 +172,15 @@ export function App() {
               onSelectExercise={handleSelectExercise}
               playbackSettings={playbackSettings}
               isPlayingAccompaniment={isPlayingAccompaniment}
+              accompanimentStart={accompanimentStart}
               onToggleAccompaniment={toggleAccompaniment}
               currentNote={currentNote}
               accompanimentVolume={accompanimentVolume}
               onVolumeChange={setAccompanimentVolume}
               onPitchAdjust={adjustPitchManually}
               onSpeedAdjust={adjustSpeedManually}
+              notesPractice={notesPractice}
+              disabled={isSessionReview}
             />
           </div>
 
@@ -137,9 +188,12 @@ export function App() {
           <div className="lg:col-span-5 flex flex-col gap-5">
             {/* Real-time Vocal Pitch & Tuning Gauge */}
             <PitchMonitor
-              getMicAnalyser={getMicAnalyser}
               isListening={isListening}
-              targetNote={currentNote}
+              targetNote={activeExercise === 'notes_practice'
+                ? notesPractice.targets[notesPractice.activeIndex] || null
+                : currentNote}
+              pitchData={pitchData}
+              signalQuality={pitchSignalQuality}
             />
 
             <TranscriptView conversation={conversation} />
@@ -164,17 +218,6 @@ export function App() {
       <footer className="border-t border-slate-800/60 py-4 text-center text-xs text-slate-500">
         <p className="m-0">VoxFlow • AI Vocal Coach powered by AssemblyAI Voice Agent (lablab.ai)</p>
       </footer>
-
-      {/* Post-Session Performance & Workout Summary Modal */}
-      <SessionSummaryModal
-        isOpen={isSummaryOpen}
-        onClose={closeSummary}
-        stats={summaryStats}
-        onStartNewSession={() => {
-          closeSummary();
-          connect();
-        }}
-      />
     </div>
   );
 }

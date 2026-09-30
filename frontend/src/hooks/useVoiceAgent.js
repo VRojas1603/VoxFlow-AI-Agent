@@ -2,6 +2,14 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
 import { scaleEngine } from '../audio/scaleEngine';
 import {
+  ACCOMPANIMENT_START_PHASES,
+  AccompanimentStartCoordinator,
+} from '../audio/accompanimentStartCoordinator';
+import {
+  isProtectedGuidedExercise,
+  shouldPauseAgentAudio,
+} from '../audio/guidedCapture';
+import {
   DEFAULT_ACCOMPANIMENT_STATE,
   applyAccompanimentAdjustment,
   resetAccompanimentEngine,
@@ -12,6 +20,20 @@ import {
   upsertCoveredTip,
 } from '../audio/exerciseControls';
 import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
+import { usePitchTracking } from './usePitchTracking';
+import {
+  SessionPerformanceTracker,
+  createEmptySessionPerformance,
+} from '../audio/performanceEvaluator';
+import {
+  buildAgentPerformanceSummary,
+  buildSessionReport,
+} from '../reports/sessionReport';
+import {
+  NOTES_PRACTICE_EXERCISE_ID,
+  NotesPracticeTracker,
+  createNotesPracticeState,
+} from '../audio/notesPractice';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -48,6 +70,12 @@ export function useVoiceAgent() {
   });
   const [activeExercise, setActiveExercise] = useState('warmup_breathing');
   const [isPlayingAccompaniment, setIsPlayingAccompaniment] = useState(false);
+  const [accompanimentStart, setAccompanimentStart] = useState({
+    phase: ACCOMPANIMENT_START_PHASES.IDLE,
+    secondsRemaining: null,
+    source: null,
+    exerciseId: null,
+  });
   const [currentNote, setCurrentNote] = useState(null);
   const [accompanimentVolume, setAccompanimentVolumeState] = useState(
     DEFAULT_ACCOMPANIMENT_STATE.volume,
@@ -58,9 +86,14 @@ export function useVoiceAgent() {
     language: getVoiceLanguage(DEFAULT_VOICE_ID),
     voice: DEFAULT_VOICE_ID,
   });
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
-  const [summaryStats, setSummaryStats] = useState(null);
+  const [sessionView, setSessionView] = useState('voice');
+  const [reportGenerationStep, setReportGenerationStep] = useState('analyzing');
+  const [sessionReport, setSessionReport] = useState(null);
   const [sessionSeconds, setSessionSeconds] = useState(0);
+  const [sessionPerformance, setSessionPerformance] = useState(
+    createEmptySessionPerformance,
+  );
+  const [notesPractice, setNotesPractice] = useState(createNotesPracticeState);
 
   const wsRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -80,19 +113,121 @@ export function useVoiceAgent() {
   const speedChangesCountRef = useRef(0);
   const volumeChangesCountRef = useRef(0);
   const processedToolCallsRef = useRef(new Map());
+  const performanceTrackerRef = useRef(new SessionPerformanceTracker());
+  const reportTransitionTimersRef = useRef(new Set());
+  const reportGenerationStartedRef = useRef(false);
+  const finalFeedbackTextRef = useRef('');
+  const accompanimentStartCoordinatorRef = useRef(null);
+  const voicePlaybackGenerationRef = useRef(0);
+  const agentAudioForwardingPausedRef = useRef(false);
+  const notesPracticeRef = useRef(null);
+  const activeExerciseRef = useRef('warmup_breathing');
+
+  const handlePitchAnalysis = useCallback((analysis) => {
+    performanceTrackerRef.current.handleAnalysis(analysis);
+    notesPracticeRef.current?.handleAnalysis(analysis);
+  }, []);
+
+  const clearReportTransitionTimers = useCallback(() => {
+    for (const timerId of reportTransitionTimersRef.current) {
+      clearTimeout(timerId);
+    }
+    reportTransitionTimersRef.current.clear();
+  }, []);
+
+  const scheduleReportTransition = useCallback((callback, delayMs) => {
+    const timerId = setTimeout(() => {
+      reportTransitionTimersRef.current.delete(timerId);
+      callback();
+    }, delayMs);
+    reportTransitionTimersRef.current.add(timerId);
+    return timerId;
+  }, []);
+
+  const {
+    pitchData,
+    signalQuality: pitchSignalQuality,
+    latestPitchSampleRef,
+    latestPitchAnalysisRef,
+  } = usePitchTracking({
+    analyserRef: micAnalyserRef,
+    enabled: isListening && (
+      !isSpeaking
+      || (isPlayingAccompaniment && isProtectedGuidedExercise(activeExercise))
+      || notesPractice.status === 'active'
+    ),
+    onAnalysis: handlePitchAnalysis,
+    profile: activeExercise === 'warmup_lip_trill' ? 'lip_trill' : 'default',
+    targetIdentity: notesPractice.status === 'active'
+      ? `notes-practice:${notesPractice.pitchShift}:${notesPractice.activeIndex}`
+      : currentNote
+        ? `${currentNote.attemptId}:${currentNote.sequenceIndex}`
+        : null,
+    learnNoiseFloor: (
+      !isPlayingAccompaniment
+      && notesPractice.status !== 'active'
+      && accompanimentStart.phase === ACCOMPANIMENT_START_PHASES.IDLE
+    ),
+  });
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
     pcmPlayerRef.current = new StreamingPCMPlayer(24000);
-    scaleEngine.onNoteChange((noteInfo) => {
+    notesPracticeRef.current = new NotesPracticeTracker({
+      onStateChange: setNotesPractice,
+      onAttemptComplete: (attempt) => {
+        performanceTrackerRef.current.recordNotesPracticeAttempt(attempt);
+        setSessionPerformance(performanceTrackerRef.current.getSnapshot());
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+      },
+    });
+    accompanimentStartCoordinatorRef.current = new AccompanimentStartCoordinator({
+      startPlayback: (exerciseId) => {
+        if (exerciseId === NOTES_PRACTICE_EXERCISE_ID) {
+          const started = notesPracticeRef.current?.start(scaleEngine.pitchShift);
+          if (!started) throw new Error('Notes Practice is already active.');
+          return;
+        }
+        scaleEngine.start(exerciseId);
+      },
+      playReadyCue: () => scaleEngine.playReadyCue(),
+      onStateChange: (startState) => {
+        agentAudioForwardingPausedRef.current = shouldPauseAgentAudio(startState);
+        setAccompanimentStart(startState);
+      },
+      onTimeout: () => {
+        scaleEngine.stop({ reason: 'start_timeout' });
+        notesPracticeRef.current?.cancel();
+        setIsPlayingAccompaniment(false);
+        setErrorMessage('Practice start timed out. Please try again.');
+      },
+    });
+    const unsubscribeTarget = scaleEngine.onTargetChange((noteInfo) => {
+      performanceTrackerRef.current.handleTarget(noteInfo);
       setCurrentNote(noteInfo);
+    });
+    const unsubscribeExerciseEvent = scaleEngine.onExerciseEvent((exerciseEvent) => {
+      const result = performanceTrackerRef.current.handleExerciseEvent(exerciseEvent);
+      if (exerciseEvent.type === 'playback.started') setIsPlayingAccompaniment(true);
+      if (exerciseEvent.type === 'playback.stopped') {
+        setIsPlayingAccompaniment(false);
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+      }
+      if (result) setSessionPerformance(performanceTrackerRef.current.getSnapshot());
     });
 
     return () => {
+      unsubscribeTarget();
+      unsubscribeExerciseEvent();
+      accompanimentStartCoordinatorRef.current?.cancel();
+      accompanimentStartCoordinatorRef.current = null;
+      notesPracticeRef.current = null;
       pcmPlayerRef.current?.close();
       scaleEngine.stop();
     };
   }, []);
+
+  useEffect(() => () => clearReportTransitionTimers(), [clearReportTransitionTimers]);
 
   // Start microphone stream and AudioWorklet at 24000 Hz
   const startMicrophone = async (ws) => {
@@ -100,8 +235,8 @@ export function useVoiceAgent() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           channelCount: 1,
           sampleRate: 24000,
         },
@@ -125,7 +260,11 @@ export function useVoiceAgent() {
       micAnalyserRef.current = micAnalyser;
 
       workletNode.port.onmessage = (event) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (
+          ws
+          && ws.readyState === WebSocket.OPEN
+          && !agentAudioForwardingPausedRef.current
+        ) {
           // Stream raw base64 PCM16 audio via input.audio
           const base64Audio = arrayBufferToBase64(event.data);
           ws.send(JSON.stringify({
@@ -164,7 +303,37 @@ export function useVoiceAgent() {
       audioCtxRef.current = null;
     }
     setIsListening(false);
+    agentAudioForwardingPausedRef.current = false;
   }, []);
+
+  const stopSessionTimer = useCallback(() => {
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+  }, []);
+
+  const beginReportGeneration = useCallback(() => {
+    if (reportGenerationStartedRef.current) return;
+    reportGenerationStartedRef.current = true;
+    finalFeedbackTextRef.current = '';
+    stopSessionTimer();
+    stopMicrophone();
+    accompanimentStartCoordinatorRef.current?.cancel();
+    scaleEngine.stop();
+    setIsPlayingAccompaniment(false);
+    clearReportTransitionTimers();
+    setSessionReport(null);
+    setReportGenerationStep('analyzing');
+    setSessionView('voice_exiting');
+    scheduleReportTransition(() => setSessionView('generating_report'), 320);
+    scheduleReportTransition(() => setReportGenerationStep('preparing'), 760);
+  }, [
+    clearReportTransitionTimers,
+    scheduleReportTransition,
+    stopMicrophone,
+    stopSessionTimer,
+  ]);
 
   const selectVoice = useCallback((voiceId) => {
     setSelectedVoice(voiceId);
@@ -176,6 +345,7 @@ export function useVoiceAgent() {
 
   const finishSession = useCallback(({ closeSocket = true } = {}) => {
     const hadActiveSession = sessionActiveRef.current;
+    const reportGenerationStarted = reportGenerationStartedRef.current;
     sessionActiveRef.current = false;
     pendingVoiceEndRef.current = false;
 
@@ -187,6 +357,8 @@ export function useVoiceAgent() {
 
     stopMicrophone();
     pcmPlayerRef.current?.stopAll();
+    notesPracticeRef.current?.stop();
+    accompanimentStartCoordinatorRef.current?.cancel();
     scaleEngine.stop();
     setIsPlayingAccompaniment(false);
     setStatus('disconnected');
@@ -196,10 +368,7 @@ export function useVoiceAgent() {
       voice: selectedVoice,
     });
 
-    if (sessionTimerRef.current) {
-      clearInterval(sessionTimerRef.current);
-      sessionTimerRef.current = null;
-    }
+    stopSessionTimer();
 
     if (!hadActiveSession) return;
 
@@ -207,8 +376,8 @@ export function useVoiceAgent() {
     const secs = sessionSecondsRef.current % 60;
     const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-    setSummaryStats({
-      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
+    const report = buildSessionReport({
+      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:00',
       exercisesPracticed: Array.from(exercisesPracticedRef.current),
       tipsCovered: [...tipsCoveredRef.current],
       languageSwitches: languageSwitchesCountRef.current,
@@ -216,11 +385,49 @@ export function useVoiceAgent() {
       speedChangesUsed: speedChangesCountRef.current,
       volumeChangesUsed: volumeChangesCountRef.current,
       messageCount: conversationRef.current.length,
+      performance: performanceTrackerRef.current.getSnapshot(),
+      finalFeedbackText: finalFeedbackTextRef.current,
     });
-    setIsSummaryOpen(true);
-  }, [selectedVoice, stopMicrophone]);
+    clearReportTransitionTimers();
+    setSessionReport(report);
+    reportGenerationStartedRef.current = false;
+    finalFeedbackTextRef.current = '';
+
+    if (reportGenerationStarted) {
+      setReportGenerationStep('finalizing');
+      setSessionView('generating_report');
+      scheduleReportTransition(() => setSessionView('loading_exiting'), 420);
+      scheduleReportTransition(() => setSessionView('report_ready'), 740);
+    } else {
+      setReportGenerationStep('analyzing');
+      setSessionView('voice_exiting');
+      scheduleReportTransition(() => setSessionView('generating_report'), 320);
+      scheduleReportTransition(() => setReportGenerationStep('preparing'), 720);
+      scheduleReportTransition(() => setReportGenerationStep('finalizing'), 1120);
+      scheduleReportTransition(() => setSessionView('loading_exiting'), 1520);
+      scheduleReportTransition(() => setSessionView('report_ready'), 1840);
+    }
+  }, [
+    clearReportTransitionTimers,
+    scheduleReportTransition,
+    selectedVoice,
+    stopMicrophone,
+    stopSessionTimer,
+  ]);
 
   const applyPlaybackAdjustment = useCallback((command) => {
+    if (
+      activeExerciseRef.current === NOTES_PRACTICE_EXERCISE_ID
+      && ['speed', 'volume'].includes(command?.control)
+    ) {
+      throw new Error('Speed and volume are not available in Notes Practice.');
+    }
+    if (
+      command?.control === 'pitch'
+      && notesPracticeRef.current?.isActive()
+    ) {
+      throw new Error('Stop Notes Practice before changing the key.');
+    }
     const transition = applyAccompanimentAdjustment({
       pitchShift: scaleEngine.pitchShift,
       speed: scaleEngine.speed,
@@ -234,6 +441,7 @@ export function useVoiceAgent() {
         pitchShift: transition.state.pitchShift,
       }));
       if (transition.changed) keyShiftsCountRef.current += 1;
+      notesPracticeRef.current?.configure(transition.state.pitchShift);
     } else if (transition.control === 'speed') {
       scaleEngine.setSpeed(transition.state.speed);
       setPlaybackSettings((current) => ({
@@ -257,10 +465,16 @@ export function useVoiceAgent() {
   }, []);
 
   const selectExercise = useCallback((exerciseId) => {
+    if (notesPracticeRef.current?.isActive()) notesPracticeRef.current.stop();
+    accompanimentStartCoordinatorRef.current?.cancel();
     const result = applyExerciseSelection(scaleEngine, exerciseId);
+    activeExerciseRef.current = exerciseId;
     setActiveExercise(exerciseId);
     setIsPlayingAccompaniment(false);
     setActiveTip(null);
+    if (exerciseId === NOTES_PRACTICE_EXERCISE_ID) {
+      notesPracticeRef.current?.configure(scaleEngine.pitchShift);
+    }
     exercisesPracticedRef.current.add(EXERCISE_NAMES[exerciseId]);
     return result;
   }, []);
@@ -285,8 +499,16 @@ export function useVoiceAgent() {
       languageSwitchesCountRef.current += 1;
       return { status: 'success', applied: true, language: lang };
     } else if (name === 'end_session') {
+      if (notesPracticeRef.current?.isActive()) {
+        notesPracticeRef.current.stop();
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+      }
       pendingVoiceEndRef.current = true;
-      return { status: 'success', applied: true };
+      beginReportGeneration();
+      return buildAgentPerformanceSummary({
+        durationSeconds: sessionSecondsRef.current,
+        performance: performanceTrackerRef.current.getSnapshot(),
+      });
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
         tipType: parameters.tip_type || 'posture',
@@ -298,29 +520,81 @@ export function useVoiceAgent() {
       tipsCoveredRef.current = upsertCoveredTip(tipsCoveredRef.current, tipObj);
       return { status: 'success', applied: true, tip_type: tipObj.tipType };
     } else if (name === 'control_accompaniment') {
+      if (activeExerciseRef.current === NOTES_PRACTICE_EXERCISE_ID) {
+        throw new Error('Notes Practice does not use accompaniment. Use control_notes_practice.');
+      }
       const action = parameters.action;
       if (action === 'play') {
         const wasPlaying = scaleEngine.isPlaying;
-        if (!wasPlaying) scaleEngine.start();
-        setIsPlayingAccompaniment(true);
+        if (wasPlaying) {
+          return {
+            status: 'success',
+            applied: false,
+            playback: 'playing',
+            exercise_id: scaleEngine.currentExercise,
+          };
+        }
+
+        const request = accompanimentStartCoordinatorRef.current?.requestStart({
+          source: 'voice',
+          exerciseId: scaleEngine.currentExercise,
+        });
+        if (request?.accepted) setErrorMessage(null);
         return {
           status: 'success',
-          applied: !wasPlaying,
-          playback: 'playing',
+          applied: Boolean(request?.accepted),
+          playback: 'scheduled',
+          countdown_seconds: 3,
+          start_phase: request?.phase || ACCOMPANIMENT_START_PHASES.IDLE,
           exercise_id: scaleEngine.currentExercise,
         };
       }
       if (action === 'stop') {
         const wasPlaying = scaleEngine.isPlaying;
-        scaleEngine.stop();
+        const cancelledStart = accompanimentStartCoordinatorRef.current?.cancel() || false;
+        scaleEngine.stop({ reason: 'manual' });
         setIsPlayingAccompaniment(false);
         return {
           status: 'success',
-          applied: wasPlaying,
+          applied: wasPlaying || cancelledStart,
           playback: 'stopped',
         };
       }
       throw new Error(`Unsupported accompaniment action: ${action || 'missing'}`);
+    } else if (name === 'control_notes_practice') {
+      if (activeExerciseRef.current !== NOTES_PRACTICE_EXERCISE_ID) {
+        throw new Error('Select Notes Practice before starting the note targets.');
+      }
+      const action = parameters.action;
+      if (action === 'start') {
+        if (notesPracticeRef.current?.isActive()) {
+          return { status: 'success', applied: false, practice: 'active' };
+        }
+        const request = accompanimentStartCoordinatorRef.current?.requestStart({
+          source: 'voice',
+          exerciseId: NOTES_PRACTICE_EXERCISE_ID,
+        });
+        if (request?.accepted) setErrorMessage(null);
+        return {
+          status: 'success',
+          applied: Boolean(request?.accepted),
+          practice: 'scheduled',
+          countdown_seconds: 3,
+          start_phase: request?.phase || ACCOMPANIMENT_START_PHASES.IDLE,
+        };
+      }
+      if (action === 'stop') {
+        const cancelledStart = accompanimentStartCoordinatorRef.current?.cancel() || false;
+        const stopped = notesPracticeRef.current?.stop();
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+        return {
+          status: 'success',
+          applied: cancelledStart || Boolean(stopped?.recorded),
+          practice: 'stopped',
+          recorded: Boolean(stopped?.recorded),
+        };
+      }
+      throw new Error(`Unsupported Notes Practice action: ${action || 'missing'}`);
     } else if (name === 'adjust_accompaniment') {
       return applyPlaybackAdjustment(parameters);
     } else if (name === 'select_exercise') {
@@ -328,21 +602,27 @@ export function useVoiceAgent() {
     }
 
     throw new Error(`Unsupported tool: ${name || 'unknown'}`);
-  }, [applyPlaybackAdjustment, selectExercise]);
+  }, [applyPlaybackAdjustment, beginReportGeneration, selectExercise]);
 
   // Connect to the Voice Agent
   const connect = useCallback(async () => {
     try {
       setStatus('connecting');
       setErrorMessage(null);
-      setIsSummaryOpen(false);
+      clearReportTransitionTimers();
+      setSessionView('voice');
+      setReportGenerationStep('analyzing');
+      setSessionReport(null);
       setConversation([]);
       conversationRef.current = [];
       setUserTranscript('');
       setAgentTranscript('');
       setActiveTip(null);
       pendingVoiceEndRef.current = false;
+      reportGenerationStartedRef.current = false;
+      finalFeedbackTextRef.current = '';
       processedToolCallsRef.current.clear();
+      accompanimentStartCoordinatorRef.current?.cancel();
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
         voice: selectedVoice,
@@ -357,8 +637,12 @@ export function useVoiceAgent() {
       keyShiftsCountRef.current = 0;
       speedChangesCountRef.current = 0;
       volumeChangesCountRef.current = 0;
+      performanceTrackerRef.current.reset();
+      setSessionPerformance(createEmptySessionPerformance());
+      notesPracticeRef.current?.configure(DEFAULT_ACCOMPANIMENT_STATE.pitchShift);
 
       resetAccompanimentEngine(scaleEngine);
+      activeExerciseRef.current = 'warmup_breathing';
       setActiveExercise('warmup_breathing');
       setIsPlayingAccompaniment(false);
       setPlaybackSettings({
@@ -426,6 +710,8 @@ export function useVoiceAgent() {
 
           // 4. Agent reply started
           if (eventType === 'reply.started') {
+            voicePlaybackGenerationRef.current += 1;
+            accompanimentStartCoordinatorRef.current?.notifyVoiceStarted();
             setIsSpeaking(true);
             return;
           }
@@ -435,19 +721,38 @@ export function useVoiceAgent() {
             const wasInterrupted = message.status === 'interrupted' || message.interrupted;
             if (wasInterrupted) {
               console.log('[Barge-in]: Agent interrupted by user');
+              voicePlaybackGenerationRef.current += 1;
               pcmPlayerRef.current?.stopAll();
+              if (accompanimentStartCoordinatorRef.current?.isPending()) {
+                accompanimentStartCoordinatorRef.current.cancel();
+                scaleEngine.stop({ reason: 'interrupted' });
+              }
+              setIsSpeaking(false);
+              return;
             }
+            const playbackGeneration = voicePlaybackGenerationRef.current;
+            const drainResult = await pcmPlayerRef.current?.waitForIdle();
+            if (playbackGeneration !== voicePlaybackGenerationRef.current) return;
             setIsSpeaking(false);
-            if (pendingVoiceEndRef.current && wasInterrupted) {
-              pendingVoiceEndRef.current = false;
+            if (drainResult?.timedOut) {
+              accompanimentStartCoordinatorRef.current?.cancel();
+              scaleEngine.stop({ reason: 'voice_timeout' });
+              setErrorMessage('Lyra’s voice playback did not finish in time. Please try again.');
+              return;
             }
+            accompanimentStartCoordinatorRef.current?.notifyVoiceReady();
             return;
           }
 
           // 6. Interruption event
           if (eventType === 'interruption' || message.interrupted) {
             console.log('[Barge-in]: Interruption detected');
+            voicePlaybackGenerationRef.current += 1;
             pcmPlayerRef.current?.stopAll();
+            if (accompanimentStartCoordinatorRef.current?.isPending()) {
+              accompanimentStartCoordinatorRef.current.cancel();
+              scaleEngine.stop({ reason: 'interrupted' });
+            }
             setIsSpeaking(false);
             return;
           }
@@ -456,6 +761,9 @@ export function useVoiceAgent() {
           if (eventType === 'transcript.agent' || (eventType === 'transcript' && message.role === 'agent')) {
             const text = message.text || '';
             if (text) {
+              if (pendingVoiceEndRef.current && reportGenerationStartedRef.current) {
+                finalFeedbackTextRef.current = text;
+              }
               setAgentTranscript(text);
               setConversation((prev) => {
                 const next = [
@@ -505,6 +813,7 @@ export function useVoiceAgent() {
             }
 
             let outcome = processedToolCallsRef.current.get(callId);
+            const toolName = toolData.name || toolData.function?.name;
             if (!outcome) {
               try {
                 outcome = {
@@ -526,17 +835,25 @@ export function useVoiceAgent() {
             }
 
             if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
-                type: 'client.tool_result',
-                call_id: callId,
-                result: outcome.result,
-                is_error: outcome.is_error,
-              }));
+              if (toolName === 'end_session' && !outcome.is_error) {
+                ws.send(JSON.stringify({
+                  type: 'client.performance_summary',
+                  call_id: callId,
+                  summary: outcome.result,
+                }));
+              } else {
+                ws.send(JSON.stringify({
+                  type: 'client.tool_result',
+                  call_id: callId,
+                  result: outcome.result,
+                  is_error: outcome.is_error,
+                }));
+              }
             }
             return;
           }
 
-          // Wait until the farewell audio queue is empty before ending the upstream session.
+          // Wait until final coaching feedback has finished playing before ending the session.
           if (eventType === 'proxy.playback_drain_requested') {
             const drainResult = await pcmPlayerRef.current?.waitForIdle();
             if (ws.readyState === WebSocket.OPEN) {
@@ -545,6 +862,23 @@ export function useVoiceAgent() {
                 timed_out: Boolean(drainResult?.timedOut),
               }));
             }
+            return;
+          }
+
+          if (eventType === 'proxy.session_end_cancelled') {
+            pendingVoiceEndRef.current = false;
+            reportGenerationStartedRef.current = false;
+            finalFeedbackTextRef.current = '';
+            clearReportTransitionTimers();
+            setSessionView('voice');
+            setReportGenerationStep('analyzing');
+            if (!sessionTimerRef.current) {
+              sessionTimerRef.current = setInterval(() => {
+                sessionSecondsRef.current += 1;
+                setSessionSeconds(sessionSecondsRef.current);
+              }, 1000);
+            }
+            await startMicrophone(ws);
             return;
           }
 
@@ -579,18 +913,42 @@ export function useVoiceAgent() {
       setStatus('error');
       setErrorMessage(err.message);
     }
-  }, [finishSession, handleToolCall, selectedVoice]);
+  }, [clearReportTransitionTimers, finishSession, handleToolCall, selectedVoice]);
 
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
+    if (activeExercise === NOTES_PRACTICE_EXERCISE_ID) {
+      if (notesPracticeRef.current?.isActive()) {
+        notesPracticeRef.current.stop();
+        accompanimentStartCoordinatorRef.current?.markPlaybackStopped();
+      } else if (accompanimentStartCoordinatorRef.current?.isPending()) {
+        accompanimentStartCoordinatorRef.current.cancel();
+        notesPracticeRef.current?.cancel();
+      } else {
+        const request = accompanimentStartCoordinatorRef.current?.requestStart({
+          source: 'manual',
+          exerciseId: NOTES_PRACTICE_EXERCISE_ID,
+        });
+        if (request?.accepted) setErrorMessage(null);
+      }
+      return;
+    }
     if (scaleEngine.isPlaying) {
-      scaleEngine.stop();
+      accompanimentStartCoordinatorRef.current?.cancel();
+      scaleEngine.stop({ reason: 'manual' });
+      setIsPlayingAccompaniment(false);
+    } else if (accompanimentStartCoordinatorRef.current?.isPending()) {
+      accompanimentStartCoordinatorRef.current.cancel();
+      scaleEngine.stop({ reason: 'manual' });
       setIsPlayingAccompaniment(false);
     } else {
       scaleEngine.setPitchShift(playbackSettings.pitchShift);
       scaleEngine.setSpeed(playbackSettings.speed);
-      scaleEngine.start(activeExercise);
-      setIsPlayingAccompaniment(true);
+      const request = accompanimentStartCoordinatorRef.current?.requestStart({
+        source: 'manual',
+        exerciseId: activeExercise,
+      });
+      if (request?.accepted) setErrorMessage(null);
     }
   }, [activeExercise, playbackSettings]);
 
@@ -626,13 +984,15 @@ export function useVoiceAgent() {
     finishSession();
   }, [finishSession]);
 
-  const closeSummary = useCallback(() => {
-    setIsSummaryOpen(false);
-  }, []);
-
-  const openSummary = useCallback(() => {
-    setIsSummaryOpen(true);
-  }, []);
+  const setUpNewSession = useCallback(() => {
+    clearReportTransitionTimers();
+    setSessionView('returning_to_setup');
+    scheduleReportTransition(() => {
+      setSessionView('voice_setup');
+      setReportGenerationStep('analyzing');
+      setErrorMessage(null);
+    }, 320);
+  }, [clearReportTransitionTimers, scheduleReportTransition]);
 
   return {
     status,
@@ -647,18 +1007,27 @@ export function useVoiceAgent() {
     activeExercise,
     setActiveExercise: selectExercise,
     isPlayingAccompaniment,
+    accompanimentStart,
     toggleAccompaniment,
     currentNote,
+    currentTarget: currentNote,
+    pitchData,
+    pitchSignalQuality,
+    latestPitchSampleRef,
+    latestPitchAnalysisRef,
+    sessionPerformance,
+    notesPractice,
+    lastExerciseFeedback: sessionPerformance.lastAttempt,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,
     adjustSpeedManually,
     getMicAnalyser: () => micAnalyserRef.current,
     getPlayerAnalyser: () => pcmPlayerRef.current?.getAnalyser() || null,
-    isSummaryOpen,
-    summaryStats,
-    openSummary,
-    closeSummary,
+    sessionView,
+    reportGenerationStep,
+    sessionReport,
+    setUpNewSession,
     sessionSeconds,
     errorMessage,
     selectedVoice,
