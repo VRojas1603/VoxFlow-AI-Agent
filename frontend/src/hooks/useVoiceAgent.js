@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
 import { scaleEngine } from '../audio/scaleEngine';
+import {
+  DEFAULT_ACCOMPANIMENT_STATE,
+  applyAccompanimentAdjustment,
+  resetAccompanimentEngine,
+} from '../audio/accompanimentControls';
 import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
@@ -32,11 +37,16 @@ export function useVoiceAgent() {
   const [agentTranscript, setAgentTranscript] = useState('');
   const [conversation, setConversation] = useState([]);
   const [activeTip, setActiveTip] = useState(null);
-  const [playbackSettings, setPlaybackSettings] = useState({ pitchShift: 0, speed: 1.0 });
+  const [playbackSettings, setPlaybackSettings] = useState({
+    pitchShift: DEFAULT_ACCOMPANIMENT_STATE.pitchShift,
+    speed: DEFAULT_ACCOMPANIMENT_STATE.speed,
+  });
   const [activeExercise, setActiveExercise] = useState('warmup_breathing');
   const [isPlayingAccompaniment, setIsPlayingAccompaniment] = useState(false);
   const [currentNote, setCurrentNote] = useState(null);
-  const [accompanimentVolume, setAccompanimentVolumeState] = useState(0.4);
+  const [accompanimentVolume, setAccompanimentVolumeState] = useState(
+    DEFAULT_ACCOMPANIMENT_STATE.volume,
+  );
   const [errorMessage, setErrorMessage] = useState(null);
   const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
   const [voiceProfile, setVoiceProfile] = useState({
@@ -63,6 +73,7 @@ export function useVoiceAgent() {
   const languageSwitchesCountRef = useRef(0);
   const keyShiftsCountRef = useRef(0);
   const speedChangesCountRef = useRef(0);
+  const volumeChangesCountRef = useRef(0);
   const processedToolCallsRef = useRef(new Map());
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
@@ -198,10 +209,47 @@ export function useVoiceAgent() {
       languageSwitches: languageSwitchesCountRef.current,
       keyShiftsUsed: keyShiftsCountRef.current,
       speedChangesUsed: speedChangesCountRef.current,
+      volumeChangesUsed: volumeChangesCountRef.current,
       messageCount: conversationRef.current.length,
     });
     setIsSummaryOpen(true);
   }, [selectedVoice, stopMicrophone]);
+
+  const applyPlaybackAdjustment = useCallback((command) => {
+    const transition = applyAccompanimentAdjustment({
+      pitchShift: scaleEngine.pitchShift,
+      speed: scaleEngine.speed,
+      volume: scaleEngine.volume,
+    }, command);
+
+    if (transition.control === 'pitch') {
+      scaleEngine.setPitchShift(transition.state.pitchShift);
+      setPlaybackSettings((current) => ({
+        ...current,
+        pitchShift: transition.state.pitchShift,
+      }));
+      if (transition.changed) keyShiftsCountRef.current += 1;
+    } else if (transition.control === 'speed') {
+      scaleEngine.setSpeed(transition.state.speed);
+      setPlaybackSettings((current) => ({
+        ...current,
+        speed: transition.state.speed,
+      }));
+      if (transition.changed) speedChangesCountRef.current += 1;
+    } else if (transition.control === 'volume') {
+      scaleEngine.setVolume(transition.state.volume);
+      setAccompanimentVolumeState(transition.state.volume);
+      if (transition.changed) volumeChangesCountRef.current += 1;
+    }
+
+    return {
+      status: 'success',
+      applied: transition.changed,
+      control: transition.control,
+      previous_value: transition.previousValue,
+      current_value: transition.currentValue,
+    };
+  }, []);
 
   // Process Tool Calls (AssemblyAI Voice Agent Function Calling)
   const handleToolCall = useCallback((toolData) => {
@@ -259,17 +307,8 @@ export function useVoiceAgent() {
         };
       }
       throw new Error(`Unsupported accompaniment action: ${action || 'missing'}`);
-    } else if (name === 'adjust_music_playback') {
-      if (parameters.pitch_shift !== undefined) keyShiftsCountRef.current += 1;
-      if (parameters.playback_speed !== undefined) speedChangesCountRef.current += 1;
-      setPlaybackSettings((prev) => {
-        const nextPitch = parameters.pitch_shift !== undefined ? parameters.pitch_shift : prev.pitchShift;
-        const nextSpeed = parameters.playback_speed !== undefined ? parameters.playback_speed : prev.speed;
-        scaleEngine.setPitchShift(nextPitch);
-        scaleEngine.setSpeed(nextSpeed);
-        return { pitchShift: nextPitch, speed: nextSpeed };
-      });
-      return { status: 'success', applied: true };
+    } else if (name === 'adjust_accompaniment') {
+      return applyPlaybackAdjustment(parameters);
     } else if (name === 'select_exercise') {
       if (parameters.exercise_id) {
         const exNames = {
@@ -291,7 +330,7 @@ export function useVoiceAgent() {
     }
 
     throw new Error(`Unsupported tool: ${name || 'unknown'}`);
-  }, []);
+  }, [applyPlaybackAdjustment]);
 
   // Connect to the Voice Agent
   const connect = useCallback(async () => {
@@ -319,6 +358,16 @@ export function useVoiceAgent() {
       languageSwitchesCountRef.current = 0;
       keyShiftsCountRef.current = 0;
       speedChangesCountRef.current = 0;
+      volumeChangesCountRef.current = 0;
+
+      resetAccompanimentEngine(scaleEngine);
+      setActiveExercise('warmup_breathing');
+      setIsPlayingAccompaniment(false);
+      setPlaybackSettings({
+        pitchShift: DEFAULT_ACCOMPANIMENT_STATE.pitchShift,
+        speed: DEFAULT_ACCOMPANIMENT_STATE.speed,
+      });
+      setAccompanimentVolumeState(DEFAULT_ACCOMPANIMENT_STATE.volume);
 
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
       sessionTimerRef.current = setInterval(() => {
@@ -537,9 +586,12 @@ export function useVoiceAgent() {
 
   // Adjust volume for accompaniment track
   const setAccompanimentVolume = useCallback((vol) => {
-    setAccompanimentVolumeState(vol);
-    scaleEngine.setVolume(vol);
-  }, []);
+    applyPlaybackAdjustment({
+      control: 'volume',
+      operation: 'set',
+      value: vol * 100,
+    });
+  }, [applyPlaybackAdjustment]);
 
   // Select exercise manually or via tool
   const selectExerciseManual = useCallback((exerciseId) => {
@@ -556,22 +608,21 @@ export function useVoiceAgent() {
 
   // Manually transpose pitch (+/- semitones)
   const adjustPitchManually = useCallback((delta) => {
-    keyShiftsCountRef.current += 1;
-    setPlaybackSettings((prev) => {
-      const newShift = Math.max(-6, Math.min(6, prev.pitchShift + delta));
-      scaleEngine.setPitchShift(newShift);
-      return { ...prev, pitchShift: newShift };
+    applyPlaybackAdjustment({
+      control: 'pitch',
+      operation: delta >= 0 ? 'increase' : 'decrease',
+      value: Math.abs(delta),
     });
-  }, []);
+  }, [applyPlaybackAdjustment]);
 
   // Manually adjust tempo speed factor
   const adjustSpeedManually = useCallback((newSpeed) => {
-    speedChangesCountRef.current += 1;
-    setPlaybackSettings((prev) => {
-      scaleEngine.setSpeed(newSpeed);
-      return { ...prev, speed: newSpeed };
+    applyPlaybackAdjustment({
+      control: 'speed',
+      operation: 'set',
+      value: newSpeed,
     });
-  }, []);
+  }, [applyPlaybackAdjustment]);
 
   // Disconnect session and generate workout report
   const disconnect = useCallback(() => {
@@ -596,7 +647,6 @@ export function useVoiceAgent() {
     activeTip,
     setActiveTip,
     playbackSettings,
-    setPlaybackSettings,
     activeExercise,
     setActiveExercise: selectExerciseManual,
     isPlayingAccompaniment,

@@ -23,6 +23,7 @@ export function SessionSummaryModal({ isOpen, onClose, stats, onStartNewSession 
     languageSwitches = 0,
     keyShiftsUsed = 0,
     speedChangesUsed = 0,
+    volumeChangesUsed = 0,
     messageCount = 0,
   } = stats;
 
@@ -43,6 +44,7 @@ ${tipsCovered.length > 0 ? tipsCovered.map((tip) => `• ${tip.title}: ${tip.exp
 
 Key Pitch Shifts Tested: ${keyShiftsUsed}
 Playback Speed Changes: ${speedChangesUsed}
+Accompaniment Volume Changes: ${volumeChangesUsed}
 
 Lyra's Recommendation for Next Session:
 "Keep focusing on low diaphragmatic breath support before high register notes, and maintain relaxed jaw posture during vocal sirens."
@@ -124,6 +126,9 @@ Lyra's Recommendation for Next Session:
           </span>
           <span>
             Speed changes: <strong className="text-white">{speedChangesUsed}</strong>
+          </span>
+          <span>
+            Volume changes: <strong className="text-white">{volumeChangesUsed}</strong>
           </span>
         </div>
 

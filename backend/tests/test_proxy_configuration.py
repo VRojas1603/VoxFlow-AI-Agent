@@ -66,6 +66,15 @@ class ProxyConfigurationTests(unittest.TestCase):
             ["play", "stop"],
         )
 
+    def test_accompaniment_adjustment_distinguishes_relative_and_absolute_changes(self):
+        tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "adjust_accompaniment")
+        properties = tool["parameters"]["properties"]
+
+        self.assertEqual(tool["parameters"]["required"], ["control", "operation"])
+        self.assertEqual(properties["control"]["enum"], ["pitch", "speed", "volume"])
+        self.assertEqual(properties["operation"]["enum"], ["increase", "decrease", "set"])
+        self.assertNotIn("adjust_music_playback", {tool["name"] for tool in VOICE_TOOLS})
+
     def test_proxy_validates_voice_and_derives_language(self):
         self.assertEqual(resolve_voice_config("LOLA"), ("lola", "es"))
         self.assertEqual(resolve_voice_config("unknown"), ("eve", "en"))

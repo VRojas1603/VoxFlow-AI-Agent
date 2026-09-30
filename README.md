@@ -15,7 +15,7 @@
 5. **Hands-Free Interface Control via Tool Calling:**
    - `show_vocal_tip`: Displays visual anatomical/pedagogical guidance cards on screen (diaphragmatic breath, lip trills, head voice, posture, sirens).
    - `control_accompaniment`: Starts or stops the active accompaniment and reports the actual browser playback state.
-   - `adjust_music_playback`: Modifies the key/pitch (semitones) or speed of the accompaniment track when a note is too high or low.
+   - `adjust_accompaniment`: Applies relative or absolute changes to accompaniment pitch, speed, and volume.
    - `switch_language`: Updates the interface language while preserving the voice selected before the session.
    - `select_exercise`: Switches the active vocal warm-up routine upon voice command.
 6. **High-Performance Audio Pipeline:** Utilizes browser `AudioWorklet` to stream 16-bit linear PCM audio at 24 kHz directly to AssemblyAI via base64 JSON frames, coupled with a seamless streaming PCM audio queue.

@@ -38,7 +38,7 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reply_done_flushes_all_pending_calls(self):
         self.coordinator.register("call-2", "select_exercise", {})
-        self.coordinator.register("call-3", "adjust_music_playback", {})
+        self.coordinator.register("call-3", "adjust_accompaniment", {})
         self.coordinator.set_client_result("call-2", {"status": "success"})
         self.coordinator.set_client_result("call-3", {"status": "success"})
 
@@ -47,7 +47,7 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event["call_id"] for event in self.sent], ["call-2", "call-3"])
 
     async def test_interruption_discards_pending_calls(self):
-        self.coordinator.register("call-4", "adjust_music_playback", {})
+        self.coordinator.register("call-4", "adjust_accompaniment", {})
 
         await self.coordinator.finish_reply(interrupted=True)
         await asyncio.sleep(0)

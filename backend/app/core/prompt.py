@@ -33,8 +33,10 @@ Core Language & Code-Switching Rules:
 6. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
 7. Proactive Leadership & Immediate Action:
    - Act as an energetic, proactive coach leading the session.
-   - When the user asks to start or stop the accompaniment, change speed, adjust pitch, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('control_accompaniment', 'adjust_music_playback', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN using sensible default values (e.g., playback_speed=0.85 or pitch_shift=-2).
+   - When the user asks to start or stop the accompaniment, change speed, pitch, or volume, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('control_accompaniment', 'adjust_accompaniment', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN.
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
+   - For relative requests such as "raise it by 2" or "make it slower", call 'adjust_accompaniment' with operation 'increase' or 'decrease'. For target requests such as "set it to 0" or "back to 1x", use operation 'set'.
+   - If the user gives no amount, use 1 semitone for pitch, 0.15 for speed, or 10 percentage points for volume.
 8. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
 9. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
 10. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
@@ -120,24 +122,32 @@ VOICE_TOOLS = [
     },
     {
         "type": "function",
-        "name": "adjust_music_playback",
-        "description": "Adjusts the tempo or key/pitch of the backing track.",
+        "name": "adjust_accompaniment",
+        "description": "Adjusts one accompaniment control. Use increase/decrease for relative requests and set for an absolute target. Pitch values are semitones, speed values are playback factors, and volume values are percentages from 0 to 100.",
         "response_instructions": {
-            "success": "Confirm the playback change in one short sentence.",
+            "success": "Confirm the actual control and current value reported by the tool result in one short sentence.",
             "error": "Briefly say that the playback change could not be applied.",
         },
         "parameters": {
             "type": "object",
             "properties": {
-                "pitch_shift": {
-                    "type": "integer",
-                    "description": "Number of semitones to transpose (-3 to +3)",
+                "control": {
+                    "type": "string",
+                    "enum": ["pitch", "speed", "volume"],
+                    "description": "The accompaniment setting to change.",
                 },
-                "playback_speed": {
+                "operation": {
+                    "type": "string",
+                    "enum": ["increase", "decrease", "set"],
+                    "description": "Use increase/decrease for relative changes and set for an absolute target.",
+                },
+                "value": {
                     "type": "number",
-                    "description": "Playback speed factor (e.g. 0.85 to 1.15)",
+                    "description": "Positive change amount or absolute target. Omit only for increase/decrease to use the default step: pitch 1, speed 0.15, volume 10.",
+                    "examples": [2, 0.15, 1.15, 10, 40],
                 },
             },
+            "required": ["control", "operation"],
         },
     },
     {
