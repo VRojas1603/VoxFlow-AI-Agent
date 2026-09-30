@@ -1,0 +1,110 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { buildSessionReport, serializeSessionReport } from '../src/reports/sessionReport.js';
+
+function createAttempt(exerciseId) {
+  const isLipTrill = exerciseId === 'warmup_lip_trill';
+  return {
+    attemptId: `${exerciseId}-1`,
+    exerciseId,
+    attemptNumber: 1,
+    signalQuality: 'valid',
+    metrics: isLipTrill
+      ? {
+          detectedNotes: 8,
+          expectedNotes: 9,
+          withinTolerancePercent: 78,
+          medianDeviationCents: 18,
+          stableNotes: 7,
+        }
+      : {
+          rangeSemitones: 19.5,
+          continuityPercent: 82,
+          directionMatchPercent: 91,
+          smoothMovementPercent: 76,
+        },
+    strengths: ['The measured pitch was consistent.'],
+    focusAreas: ['Keep the upper part of the exercise connected.'],
+    nextAction: 'Repeat the exercise once at the same speed.',
+  };
+}
+
+test('builds one report model for the inline view and download', () => {
+  const lipTrill = createAttempt('warmup_lip_trill');
+  const report = buildSessionReport({
+    durationFormatted: '05:12',
+    exercisesPracticed: ['Diaphragmatic Breathing', 'Lip Trill Scale'],
+    tipsCovered: [],
+    languageSwitches: 0,
+    keyShiftsUsed: 2,
+    speedChangesUsed: 1,
+    volumeChangesUsed: 0,
+    messageCount: 14,
+    performance: {
+      breathingCycles: 2,
+      lipTrillAttempts: [lipTrill],
+      sirenAttempts: [],
+      lastAttempt: lipTrill,
+    },
+    completedAt: new Date('2026-09-30T15:00:00.000Z'),
+  });
+
+  assert.equal(report.durationFormatted, '05:12');
+  assert.equal(report.breathingCycles, 2);
+  assert.equal(report.evaluatedAttempts, 1);
+  assert.equal(report.finalFeedback.status, 'fallback');
+  assert.match(report.finalFeedback.text, /measured pitch was consistent/i);
+  assert.equal(report.playbackAdjustments.keyShifts, 2);
+});
+
+test('serializes measured attempts without adding an overall score', () => {
+  const lipTrill = createAttempt('warmup_lip_trill');
+  const siren = createAttempt('warmup_sirens');
+  const report = buildSessionReport({
+    durationFormatted: '07:30',
+    exercisesPracticed: ['Lip Trill Scale', 'Vocal Sirens'],
+    tipsCovered: [],
+    languageSwitches: 1,
+    keyShiftsUsed: 0,
+    speedChangesUsed: 2,
+    volumeChangesUsed: 1,
+    messageCount: 20,
+    performance: {
+      breathingCycles: 0,
+      lipTrillAttempts: [lipTrill],
+      sirenAttempts: [siren],
+      lastAttempt: siren,
+    },
+    completedAt: new Date('2026-09-30T15:00:00.000Z'),
+  });
+
+  const text = serializeSessionReport(report);
+
+  assert.match(text, /Detected notes: 8\/9/);
+  assert.match(text, /Continuity: 82%/);
+  assert.match(text, /Session Feedback/);
+  assert.doesNotMatch(text, /overall score/i);
+});
+
+test('uses neutral feedback when no guided attempt was completed', () => {
+  const report = buildSessionReport({
+    durationFormatted: '00:40',
+    exercisesPracticed: [],
+    tipsCovered: [],
+    languageSwitches: 0,
+    keyShiftsUsed: 0,
+    speedChangesUsed: 0,
+    volumeChangesUsed: 0,
+    messageCount: 2,
+    performance: {
+      breathingCycles: 0,
+      lipTrillAttempts: [],
+      sirenAttempts: [],
+      lastAttempt: null,
+    },
+    completedAt: new Date('2026-09-30T15:00:00.000Z'),
+  });
+
+  assert.match(report.finalFeedback.text, /no complete guided exercise/i);
+});

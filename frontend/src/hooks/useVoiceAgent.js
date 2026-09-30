@@ -17,6 +17,7 @@ import {
   SessionPerformanceTracker,
   createEmptySessionPerformance,
 } from '../audio/performanceEvaluator';
+import { buildSessionReport } from '../reports/sessionReport';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
 
@@ -63,8 +64,9 @@ export function useVoiceAgent() {
     language: getVoiceLanguage(DEFAULT_VOICE_ID),
     voice: DEFAULT_VOICE_ID,
   });
-  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
-  const [summaryStats, setSummaryStats] = useState(null);
+  const [sessionView, setSessionView] = useState('voice');
+  const [reportGenerationStep, setReportGenerationStep] = useState('analyzing');
+  const [sessionReport, setSessionReport] = useState(null);
   const [sessionSeconds, setSessionSeconds] = useState(0);
   const [sessionPerformance, setSessionPerformance] = useState(
     createEmptySessionPerformance,
@@ -89,9 +91,26 @@ export function useVoiceAgent() {
   const volumeChangesCountRef = useRef(0);
   const processedToolCallsRef = useRef(new Map());
   const performanceTrackerRef = useRef(new SessionPerformanceTracker());
+  const reportTransitionTimersRef = useRef(new Set());
 
   const handlePitchAnalysis = useCallback((analysis) => {
     performanceTrackerRef.current.handleAnalysis(analysis);
+  }, []);
+
+  const clearReportTransitionTimers = useCallback(() => {
+    for (const timerId of reportTransitionTimersRef.current) {
+      clearTimeout(timerId);
+    }
+    reportTransitionTimersRef.current.clear();
+  }, []);
+
+  const scheduleReportTransition = useCallback((callback, delayMs) => {
+    const timerId = setTimeout(() => {
+      reportTransitionTimersRef.current.delete(timerId);
+      callback();
+    }, delayMs);
+    reportTransitionTimersRef.current.add(timerId);
+    return timerId;
   }, []);
 
   const {
@@ -126,6 +145,8 @@ export function useVoiceAgent() {
       scaleEngine.stop();
     };
   }, []);
+
+  useEffect(() => () => clearReportTransitionTimers(), [clearReportTransitionTimers]);
 
   // Start microphone stream and AudioWorklet at 24000 Hz
   const startMicrophone = async (ws) => {
@@ -240,8 +261,8 @@ export function useVoiceAgent() {
     const secs = sessionSecondsRef.current % 60;
     const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 
-    setSummaryStats({
-      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
+    const report = buildSessionReport({
+      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:00',
       exercisesPracticed: Array.from(exercisesPracticedRef.current),
       tipsCovered: [...tipsCoveredRef.current],
       languageSwitches: languageSwitchesCountRef.current,
@@ -249,9 +270,23 @@ export function useVoiceAgent() {
       speedChangesUsed: speedChangesCountRef.current,
       volumeChangesUsed: volumeChangesCountRef.current,
       messageCount: conversationRef.current.length,
+      performance: performanceTrackerRef.current.getSnapshot(),
     });
-    setIsSummaryOpen(true);
-  }, [selectedVoice, stopMicrophone]);
+    clearReportTransitionTimers();
+    setSessionReport(report);
+    setReportGenerationStep('analyzing');
+    setSessionView('voice_exiting');
+    scheduleReportTransition(() => setSessionView('generating_report'), 320);
+    scheduleReportTransition(() => setReportGenerationStep('preparing'), 720);
+    scheduleReportTransition(() => setReportGenerationStep('finalizing'), 1120);
+    scheduleReportTransition(() => setSessionView('loading_exiting'), 1520);
+    scheduleReportTransition(() => setSessionView('report_ready'), 1840);
+  }, [
+    clearReportTransitionTimers,
+    scheduleReportTransition,
+    selectedVoice,
+    stopMicrophone,
+  ]);
 
   const applyPlaybackAdjustment = useCallback((command) => {
     const transition = applyAccompanimentAdjustment({
@@ -368,7 +403,10 @@ export function useVoiceAgent() {
     try {
       setStatus('connecting');
       setErrorMessage(null);
-      setIsSummaryOpen(false);
+      clearReportTransitionTimers();
+      setSessionView('voice');
+      setReportGenerationStep('analyzing');
+      setSessionReport(null);
       setConversation([]);
       conversationRef.current = [];
       setUserTranscript('');
@@ -614,7 +652,7 @@ export function useVoiceAgent() {
       setStatus('error');
       setErrorMessage(err.message);
     }
-  }, [finishSession, handleToolCall, selectedVoice]);
+  }, [clearReportTransitionTimers, finishSession, handleToolCall, selectedVoice]);
 
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
@@ -661,13 +699,13 @@ export function useVoiceAgent() {
     finishSession();
   }, [finishSession]);
 
-  const closeSummary = useCallback(() => {
-    setIsSummaryOpen(false);
-  }, []);
-
-  const openSummary = useCallback(() => {
-    setIsSummaryOpen(true);
-  }, []);
+  const startNewSession = useCallback(() => {
+    clearReportTransitionTimers();
+    setSessionView('starting_new_session');
+    scheduleReportTransition(() => {
+      connect();
+    }, 320);
+  }, [clearReportTransitionTimers, connect, scheduleReportTransition]);
 
   return {
     status,
@@ -697,10 +735,10 @@ export function useVoiceAgent() {
     adjustSpeedManually,
     getMicAnalyser: () => micAnalyserRef.current,
     getPlayerAnalyser: () => pcmPlayerRef.current?.getAnalyser() || null,
-    isSummaryOpen,
-    summaryStats,
-    openSummary,
-    closeSummary,
+    sessionView,
+    reportGenerationStep,
+    sessionReport,
+    startNewSession,
     sessionSeconds,
     errorMessage,
     selectedVoice,

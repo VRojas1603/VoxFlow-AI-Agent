@@ -11,6 +11,7 @@ export function Header({
   onVoiceChange,
   voiceProfile,
   sessionSeconds = 0,
+  isSessionReview = false,
 }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
@@ -43,7 +44,7 @@ export function Header({
 
         {/* Status indicator & Voice profile & Connect Action */}
         <div className="flex flex-wrap items-center justify-end gap-3">
-          {status === 'disconnected' && (
+          {status === 'disconnected' && !isSessionReview && (
             <VoiceSelector value={selectedVoice} onChange={onVoiceChange} />
           )}
 
@@ -68,7 +69,9 @@ export function Header({
           <div className="hidden md:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300">
             <span
               className={`w-2 h-2 rounded-full ${
-                isConnected
+                isSessionReview
+                  ? 'bg-purple-400'
+                  : isConnected
                   ? 'bg-emerald-400 animate-pulse'
                   : isConnecting
                   ? 'bg-amber-400 animate-ping'
@@ -76,7 +79,9 @@ export function Header({
               }`}
             />
             <span>
-              {isConnected
+              {isSessionReview
+                ? 'Session Complete'
+                : isConnected
                 ? 'Live Connected'
                 : isConnecting
                 ? 'Connecting to Lyra...'
@@ -85,7 +90,7 @@ export function Header({
           </div>
 
           {/* Connect / Disconnect button */}
-          {isConnected ? (
+          {isSessionReview ? null : isConnected ? (
             <button
               onClick={onDisconnect}
               className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer"
