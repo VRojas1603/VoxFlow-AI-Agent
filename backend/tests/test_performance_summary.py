@@ -18,7 +18,12 @@ class PerformanceSummaryTests(unittest.TestCase):
                     "median_deviation_cents": 18.4,
                     "stable_notes": 7,
                     "missed_notes": 1,
-                    "octave_error_notes": 0,
+                    "register_offset_semitones": -12,
+                    "rejected_samples": {
+                        "quiet": 2,
+                        "unclear": 1,
+                        "out_of_range": 0,
+                    },
                     "unsupported": 999,
                 },
                 "strengths": ["Pitch stayed centered."],
@@ -36,6 +41,8 @@ class PerformanceSummaryTests(unittest.TestCase):
 
         attempt = summary["lip_trill_attempts"][0]
         self.assertEqual(attempt["metrics"]["detected_notes"], 8)
+        self.assertEqual(attempt["metrics"]["register_offset_semitones"], -12)
+        self.assertEqual(attempt["metrics"]["rejected_samples"]["quiet"], 2)
         self.assertNotIn("unsupported", attempt)
         self.assertNotIn("unsupported", attempt["metrics"])
         self.assertNotIn("unsupported", summary)

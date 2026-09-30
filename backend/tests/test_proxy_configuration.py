@@ -92,6 +92,13 @@ class ProxyConfigurationTests(unittest.TestCase):
         self.assertIn("how can I do this properly?", prompt)
         self.assertIn("exercise selection alone", tip_tool["description"])
 
+    def test_isolated_practice_sounds_do_not_trigger_agent_feedback(self):
+        prompt = get_session_update_payload()["session"]["system_prompt"]
+
+        self.assertIn("lip trill vibrations", prompt)
+        self.assertIn("Do not reply to these isolated practice sounds", prompt)
+        self.assertIn("provides their results at session end", prompt)
+
     def test_exercise_selection_stops_playback_without_automatic_tip(self):
         tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "select_exercise")
 

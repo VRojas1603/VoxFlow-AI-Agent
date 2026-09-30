@@ -41,6 +41,21 @@ function getSignalQuality(validUnits, totalUnits) {
   return 'partial';
 }
 
+function countRejectedSamples(frames) {
+  const counts = {
+    quiet: 0,
+    unclear: 0,
+    outOfRange: 0,
+  };
+  for (const frame of frames) {
+    if (frame.sample) continue;
+    if (frame.signalQuality === 'quiet') counts.quiet += 1;
+    if (frame.signalQuality === 'unclear') counts.unclear += 1;
+    if (frame.signalQuality === 'out_of_range') counts.outOfRange += 1;
+  }
+  return counts;
+}
+
 function buildLipTrillFeedback(metrics) {
   if (metrics.detectedNotes === 0) {
     return {
@@ -62,9 +77,6 @@ function buildLipTrillFeedback(metrics) {
   if (metrics.missedNotes > 2) {
     focus = `${metrics.missedNotes} target notes did not contain enough clear vocal signal.`;
     nextAction = 'Repeat at a slower speed and sustain every note through its full duration.';
-  } else if (metrics.octaveErrorNotes > 0) {
-    focus = `${metrics.octaveErrorNotes} notes were detected near a different octave from the target.`;
-    nextAction = 'Listen to the first reference note, match its octave, and then repeat the scale.';
   } else if (metrics.medianDeviationCents > BEGINNER_TOLERANCE_CENTS) {
     const direction = metrics.medianSignedDeviationCents < 0 ? 'below' : 'above';
     focus = `The detected pitch tended to sit ${direction} the target notes.`;
@@ -85,11 +97,9 @@ function evaluateLipTrill(attempt, attemptNumber) {
   const noteTargets = attempt.targets
     .filter((target) => target.targetType === 'note')
     .sort((left, right) => left.sequenceIndex - right.sequenceIndex);
-  const errors = [];
-  const signedErrors = [];
+  const detectedTargetSamples = [];
   let detectedNotes = 0;
   let stableNotes = 0;
-  let octaveErrorNotes = 0;
 
   for (const target of noteTargets) {
     const samples = attempt.frames
@@ -98,12 +108,24 @@ function evaluateLipTrill(attempt, attemptNumber) {
     if (samples.length < MIN_VALID_FRAMES_PER_NOTE) continue;
 
     detectedNotes += 1;
-    const noteErrors = samples.map((sample) => (sample.midiFloat - target.midiNote) * 100);
+    detectedTargetSamples.push({ target, samples });
+  }
+
+  const rawSemitoneDifferences = detectedTargetSamples.flatMap(({ target, samples }) => (
+    samples.map((sample) => sample.midiFloat - target.midiNote)
+  ));
+  const registerOffsetSemitones = rawSemitoneDifferences.length
+    ? Math.round(median(rawSemitoneDifferences) / 12) * 12
+    : 0;
+  const signedErrors = [];
+  const errors = [];
+  for (const { target, samples } of detectedTargetSamples) {
+    const noteErrors = samples.map((sample) => (
+      (sample.midiFloat - registerOffsetSemitones - target.midiNote) * 100
+    ));
     signedErrors.push(...noteErrors);
     errors.push(...noteErrors.map(Math.abs));
-
     if (medianAbsoluteDeviation(noteErrors) <= STABLE_NOTE_MAD_CENTS) stableNotes += 1;
-    if (Math.abs(median(noteErrors)) >= 900) octaveErrorNotes += 1;
   }
 
   const expectedNotes = noteTargets.length;
@@ -115,13 +137,14 @@ function evaluateLipTrill(attempt, attemptNumber) {
     detectedNotes,
     missedNotes: Math.max(0, expectedNotes - detectedNotes),
     stableNotes,
-    octaveErrorNotes,
+    registerOffsetSemitones,
     withinTolerancePercent: errors.length
       ? round((withinToleranceFrames / errors.length) * 100)
       : 0,
     medianDeviationCents: round(median(errors), 1),
     medianSignedDeviationCents: round(median(signedErrors), 1),
     validSamples: errors.length,
+    rejectedSamples: countRejectedSamples(attempt.frames),
   };
   const signalQuality = getSignalQuality(detectedNotes, expectedNotes);
 
@@ -272,6 +295,7 @@ function evaluateSiren(attempt, attemptNumber) {
     medianContourDeviationCents: round(median(contourErrors), 1),
     interruptions: countInterruptions(orderedFrames),
     validSamples: validFrames.length,
+    rejectedSamples: countRejectedSamples(orderedFrames),
   };
   const signalQuality = completedDirections === 2 && continuityPercent >= 60
     ? 'valid'

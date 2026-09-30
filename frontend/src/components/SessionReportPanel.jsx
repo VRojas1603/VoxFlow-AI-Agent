@@ -45,12 +45,14 @@ function AttemptCard({ title, attempt, type }) {
         ['Detected notes', `${attempt.metrics.detectedNotes}/${attempt.metrics.expectedNotes}`],
         ['Within tolerance', `${attempt.metrics.withinTolerancePercent}%`],
         ['Median deviation', `${attempt.metrics.medianDeviationCents}¢`],
+        ['Register alignment', `${attempt.metrics.registerOffsetSemitones >= 0 ? '+' : ''}${attempt.metrics.registerOffsetSemitones} st`],
       ]
     : [
         ['Range', `${attempt.metrics.rangeSemitones} semitones`],
         ['Continuity', `${attempt.metrics.continuityPercent}%`],
         ['Direction match', `${attempt.metrics.directionMatchPercent}%`],
       ];
+  const rejectedSamples = attempt.metrics.rejectedSamples;
 
   return (
     <div className="rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4 flex flex-col gap-3">
@@ -66,9 +68,12 @@ function AttemptCard({ title, attempt, type }) {
           {attempt.signalQuality.replace('_', ' ')}
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {metrics.map(([label, value]) => <Metric key={label} label={label} value={value} />)}
       </div>
+      <p className="m-0 text-[11px] text-slate-500">
+        Capture diagnostics: {rejectedSamples.quiet} quiet, {rejectedSamples.unclear} unclear, {rejectedSamples.outOfRange} out of range.
+      </p>
       <p className="m-0 text-xs leading-relaxed text-slate-400">{attempt.focusAreas[0]}</p>
     </div>
   );

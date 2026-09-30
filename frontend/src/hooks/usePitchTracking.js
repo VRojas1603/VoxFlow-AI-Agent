@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  DEFAULT_PITCH_TRACKING_CONFIG,
   createPitchAnalyzer,
+  createPitchSampleStabilizer,
+  getPitchTrackingConfig,
 } from '../audio/pitchDetector';
 
 const SAMPLE_INTERVAL_MS = 40;
 const DISPLAY_INTERVAL_MS = 80;
 const DECAY_AFTER_MS = 360;
-const NOISE_FLOOR_MULTIPLIER = 2.5;
 const INITIAL_NOISE_FLOOR = 0.004;
 
-export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
+export function usePitchTracking({
+  analyserRef,
+  enabled,
+  onAnalysis,
+  profile = 'default',
+  targetIdentity = null,
+  learnNoiseFloor = true,
+}) {
   const [pitchData, setPitchData] = useState(null);
   const [signalQuality, setSignalQuality] = useState('unavailable');
   const analyzerRef = useRef(null);
@@ -21,10 +28,20 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
   const lastValidAtRef = useRef(0);
   const lastDisplayAtRef = useRef(0);
   const onAnalysisRef = useRef(onAnalysis);
+  const learnNoiseFloorRef = useRef(learnNoiseFloor);
+  const stabilizerRef = useRef(null);
 
   useEffect(() => {
     onAnalysisRef.current = onAnalysis;
   }, [onAnalysis]);
+
+  useEffect(() => {
+    learnNoiseFloorRef.current = learnNoiseFloor;
+  }, [learnNoiseFloor]);
+
+  useEffect(() => {
+    stabilizerRef.current?.reset();
+  }, [targetIdentity]);
 
   useEffect(() => {
     if (!enabled) {
@@ -33,8 +50,10 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
       return undefined;
     }
 
-    analyzerRef.current = createPitchAnalyzer();
-    bufferRef.current = new Float32Array(DEFAULT_PITCH_TRACKING_CONFIG.inputLength);
+    const trackingConfig = getPitchTrackingConfig(profile);
+    analyzerRef.current = createPitchAnalyzer(trackingConfig);
+    stabilizerRef.current = createPitchSampleStabilizer(trackingConfig);
+    bufferRef.current = new Float32Array(trackingConfig.inputLength);
     noiseFloorRef.current = INITIAL_NOISE_FLOOR;
     lastValidAtRef.current = 0;
     lastDisplayAtRef.current = 0;
@@ -43,12 +62,15 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
       const analyser = analyserRef.current;
       if (!analyser) return;
 
-      if (analyser.fftSize !== DEFAULT_PITCH_TRACKING_CONFIG.inputLength) {
-        analyser.fftSize = DEFAULT_PITCH_TRACKING_CONFIG.inputLength;
+      if (analyser.fftSize !== trackingConfig.inputLength) {
+        analyser.fftSize = trackingConfig.inputLength;
       }
       if (bufferRef.current.length !== analyser.fftSize) {
         bufferRef.current = new Float32Array(analyser.fftSize);
-        analyzerRef.current = createPitchAnalyzer({ inputLength: analyser.fftSize });
+        analyzerRef.current = createPitchAnalyzer({
+          ...trackingConfig,
+          inputLength: analyser.fftSize,
+        });
       }
 
       analyser.getFloatTimeDomainData(bufferRef.current);
@@ -56,14 +78,20 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
       const audioTime = analyser.context?.currentTime ?? null;
       const capturedAtMs = performance.now();
       const minimumRms = Math.max(
-        DEFAULT_PITCH_TRACKING_CONFIG.minimumRms,
-        noiseFloorRef.current * NOISE_FLOOR_MULTIPLIER,
+        trackingConfig.minimumRms,
+        noiseFloorRef.current * trackingConfig.noiseFloorMultiplier,
       );
-      const analysis = analyzerRef.current.analyze(bufferRef.current, sampleRate, {
+      let analysis = analyzerRef.current.analyze(bufferRef.current, sampleRate, {
         audioTime,
         capturedAtMs,
         minimumRms,
       });
+      if (analysis.sample) {
+        analysis = {
+          ...analysis,
+          sample: stabilizerRef.current.stabilize(analysis.sample),
+        };
+      }
       const now = capturedAtMs;
 
       latestAnalysisRef.current = analysis;
@@ -72,10 +100,10 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
       if (analysis.sample) {
         latestSampleRef.current = analysis.sample;
         lastValidAtRef.current = now;
-      } else if (analysis.signalQuality === 'quiet') {
+      } else if (analysis.signalQuality === 'quiet' && learnNoiseFloorRef.current) {
         noiseFloorRef.current = (
           noiseFloorRef.current * 0.92
-          + Math.min(analysis.rms, DEFAULT_PITCH_TRACKING_CONFIG.minimumRms) * 0.08
+          + Math.min(analysis.rms, trackingConfig.minimumRms) * 0.08
         );
       }
 
@@ -102,7 +130,7 @@ export function usePitchTracking({ analyserRef, enabled, onAnalysis }) {
       latestSampleRef.current = null;
       latestAnalysisRef.current = null;
     };
-  }, [analyserRef, enabled]);
+  }, [analyserRef, enabled, profile]);
 
   return {
     pitchData: enabled ? pitchData : null,

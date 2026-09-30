@@ -6,6 +6,10 @@ import {
   AccompanimentStartCoordinator,
 } from '../audio/accompanimentStartCoordinator';
 import {
+  isProtectedGuidedExercise,
+  shouldPauseAgentAudio,
+} from '../audio/guidedCapture';
+import {
   DEFAULT_ACCOMPANIMENT_STATE,
   applyAccompanimentAdjustment,
   resetAccompanimentEngine,
@@ -109,6 +113,7 @@ export function useVoiceAgent() {
   const finalFeedbackTextRef = useRef('');
   const accompanimentStartCoordinatorRef = useRef(null);
   const voicePlaybackGenerationRef = useRef(0);
+  const agentAudioForwardingPausedRef = useRef(false);
 
   const handlePitchAnalysis = useCallback((analysis) => {
     performanceTrackerRef.current.handleAnalysis(analysis);
@@ -137,8 +142,19 @@ export function useVoiceAgent() {
     latestPitchAnalysisRef,
   } = usePitchTracking({
     analyserRef: micAnalyserRef,
-    enabled: isListening && !isSpeaking,
+    enabled: isListening && (
+      !isSpeaking
+      || (isPlayingAccompaniment && isProtectedGuidedExercise(activeExercise))
+    ),
     onAnalysis: handlePitchAnalysis,
+    profile: activeExercise === 'warmup_lip_trill' ? 'lip_trill' : 'default',
+    targetIdentity: currentNote
+      ? `${currentNote.attemptId}:${currentNote.sequenceIndex}`
+      : null,
+    learnNoiseFloor: (
+      !isPlayingAccompaniment
+      && accompanimentStart.phase === ACCOMPANIMENT_START_PHASES.IDLE
+    ),
   });
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
@@ -147,7 +163,10 @@ export function useVoiceAgent() {
     accompanimentStartCoordinatorRef.current = new AccompanimentStartCoordinator({
       startPlayback: (exerciseId) => scaleEngine.start(exerciseId),
       playReadyCue: () => scaleEngine.playReadyCue(),
-      onStateChange: setAccompanimentStart,
+      onStateChange: (startState) => {
+        agentAudioForwardingPausedRef.current = shouldPauseAgentAudio(startState);
+        setAccompanimentStart(startState);
+      },
       onTimeout: () => {
         scaleEngine.stop({ reason: 'start_timeout' });
         setIsPlayingAccompaniment(false);
@@ -186,8 +205,8 @@ export function useVoiceAgent() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          noiseSuppression: false,
+          autoGainControl: false,
           channelCount: 1,
           sampleRate: 24000,
         },
@@ -211,7 +230,11 @@ export function useVoiceAgent() {
       micAnalyserRef.current = micAnalyser;
 
       workletNode.port.onmessage = (event) => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (
+          ws
+          && ws.readyState === WebSocket.OPEN
+          && !agentAudioForwardingPausedRef.current
+        ) {
           // Stream raw base64 PCM16 audio via input.audio
           const base64Audio = arrayBufferToBase64(event.data);
           ws.send(JSON.stringify({
@@ -250,6 +273,7 @@ export function useVoiceAgent() {
       audioCtxRef.current = null;
     }
     setIsListening(false);
+    agentAudioForwardingPausedRef.current = false;
   }, []);
 
   const stopSessionTimer = useCallback(() => {

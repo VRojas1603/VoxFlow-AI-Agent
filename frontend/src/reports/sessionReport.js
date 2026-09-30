@@ -96,7 +96,12 @@ function mapLipTrillAttempt(attempt) {
       median_deviation_cents: attempt.metrics.medianDeviationCents,
       stable_notes: attempt.metrics.stableNotes,
       missed_notes: attempt.metrics.missedNotes,
-      octave_error_notes: attempt.metrics.octaveErrorNotes,
+      register_offset_semitones: attempt.metrics.registerOffsetSemitones,
+      rejected_samples: {
+        quiet: attempt.metrics.rejectedSamples.quiet,
+        unclear: attempt.metrics.rejectedSamples.unclear,
+        out_of_range: attempt.metrics.rejectedSamples.outOfRange,
+      },
     },
     ...mapFeedback(attempt),
   };
@@ -113,6 +118,11 @@ function mapSirenAttempt(attempt) {
       direction_match_percent: attempt.metrics.directionMatchPercent,
       smooth_movement_percent: attempt.metrics.smoothMovementPercent,
       interruptions: attempt.metrics.interruptions,
+      rejected_samples: {
+        quiet: attempt.metrics.rejectedSamples.quiet,
+        unclear: attempt.metrics.rejectedSamples.unclear,
+        out_of_range: attempt.metrics.rejectedSamples.outOfRange,
+      },
     },
     ...mapFeedback(attempt),
   };
@@ -140,6 +150,8 @@ function formatAttempt(attempt) {
       `  Pitch within ±30 cents: ${attempt.metrics.withinTolerancePercent}%`,
       `  Median deviation: ${attempt.metrics.medianDeviationCents} cents`,
       `  Stable notes: ${attempt.metrics.stableNotes}`,
+      `  Register alignment: ${attempt.metrics.registerOffsetSemitones >= 0 ? '+' : ''}${attempt.metrics.registerOffsetSemitones} semitones`,
+      `  Rejected samples: quiet ${attempt.metrics.rejectedSamples.quiet}, unclear ${attempt.metrics.rejectedSamples.unclear}, out of range ${attempt.metrics.rejectedSamples.outOfRange}`,
       `  Focus: ${attempt.focusAreas[0]}`,
       `  Next action: ${attempt.nextAction}`,
     ].join('\n');
@@ -151,6 +163,7 @@ function formatAttempt(attempt) {
     `  Continuity: ${attempt.metrics.continuityPercent}%`,
     `  Direction match: ${attempt.metrics.directionMatchPercent}%`,
     `  Smooth movement: ${attempt.metrics.smoothMovementPercent}%`,
+    `  Rejected samples: quiet ${attempt.metrics.rejectedSamples.quiet}, unclear ${attempt.metrics.rejectedSamples.unclear}, out of range ${attempt.metrics.rejectedSamples.outOfRange}`,
     `  Focus: ${attempt.focusAreas[0]}`,
     `  Next action: ${attempt.nextAction}`,
   ].join('\n');

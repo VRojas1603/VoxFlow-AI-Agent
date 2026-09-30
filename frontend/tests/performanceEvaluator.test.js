@@ -113,8 +113,9 @@ test('marks a lip trill as insufficient when too few notes contain valid pitch',
       durationMs: 450,
     };
     tracker.handleTarget(target);
+    const signalQuality = ['quiet', 'unclear', 'out_of_range'][sequenceIndex % 3];
     tracker.handleAnalysis({
-      signalQuality: 'quiet',
+      signalQuality,
       sample: null,
       capturedAtMs: target.timelineStartedAtMs + 200,
     });
@@ -130,6 +131,81 @@ test('marks a lip trill as insufficient when too few notes contain valid pitch',
   assert.equal(summary.signalQuality, 'insufficient');
   assert.equal(summary.metrics.detectedNotes, 0);
   assert.equal(summary.metrics.missedNotes, 9);
+  assert.deepEqual(summary.metrics.rejectedSamples, {
+    quiet: 3,
+    unclear: 3,
+    outOfRange: 3,
+  });
+});
+
+test('aligns one global octave across a lip trill attempt', () => {
+  const tracker = new SessionPerformanceTracker();
+  const attemptId = 'lip-trill-octave-alignment';
+  startAttempt(tracker, 'warmup_lip_trill', attemptId);
+  const targetNotes = [60, 62, 64];
+
+  targetNotes.forEach((midiNote, sequenceIndex) => {
+    const target = {
+      targetType: 'note',
+      exerciseId: 'warmup_lip_trill',
+      attemptId,
+      sequenceIndex,
+      sequenceLength: targetNotes.length,
+      midiNote,
+      timelineStartedAtMs: 1000 + sequenceIndex * 500,
+      durationMs: 450,
+    };
+    tracker.handleTarget(target);
+    for (const offsetMs of [160, 240, 320]) {
+      tracker.handleAnalysis(createValidAnalysis(
+        target,
+        target.timelineStartedAtMs + offsetMs,
+        midiNote - 12,
+      ));
+    }
+  });
+
+  const summary = tracker.handleExerciseEvent({
+    type: 'attempt.completed',
+    exerciseId: 'warmup_lip_trill',
+    attemptId,
+    completedAtMs: 3000,
+  });
+
+  assert.equal(summary.metrics.registerOffsetSemitones, -12);
+  assert.equal(summary.metrics.medianDeviationCents, 0);
+  assert.equal(summary.metrics.withinTolerancePercent, 100);
+});
+
+test('global octave alignment preserves a real semitone error', () => {
+  const tracker = new SessionPerformanceTracker();
+  const attemptId = 'lip-trill-semitone-error';
+  startAttempt(tracker, 'warmup_lip_trill', attemptId);
+  const target = {
+    targetType: 'note',
+    exerciseId: 'warmup_lip_trill',
+    attemptId,
+    sequenceIndex: 0,
+    sequenceLength: 1,
+    midiNote: 60,
+    timelineStartedAtMs: 1000,
+    durationMs: 450,
+  };
+  tracker.handleTarget(target);
+  for (const offsetMs of [160, 240, 320]) {
+    tracker.handleAnalysis(createValidAnalysis(target, 1000 + offsetMs, 49));
+  }
+
+  const summary = tracker.handleExerciseEvent({
+    type: 'attempt.completed',
+    exerciseId: 'warmup_lip_trill',
+    attemptId,
+    completedAtMs: 1600,
+  });
+
+  assert.equal(summary.metrics.registerOffsetSemitones, -12);
+  assert.equal(summary.metrics.medianDeviationCents, 100);
+  assert.equal(summary.metrics.withinTolerancePercent, 0);
 });
 
 test('evaluates an octave-aligned siren across both directions', () => {

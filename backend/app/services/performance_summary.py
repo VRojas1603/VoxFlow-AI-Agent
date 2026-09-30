@@ -48,6 +48,15 @@ def _sanitize_feedback(attempt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sanitize_rejected_samples(value: Any) -> dict[str, int | float]:
+    samples = value if isinstance(value, dict) else {}
+    return {
+        "quiet": _bounded_number(samples.get("quiet"), 0, 10000),
+        "unclear": _bounded_number(samples.get("unclear"), 0, 10000),
+        "out_of_range": _bounded_number(samples.get("out_of_range"), 0, 10000),
+    }
+
+
 def _sanitize_lip_trill_attempt(attempt: Any) -> dict[str, Any] | None:
     if not isinstance(attempt, dict):
         return None
@@ -68,8 +77,11 @@ def _sanitize_lip_trill_attempt(attempt: Any) -> dict[str, Any] | None:
             ),
             "stable_notes": _bounded_number(metrics.get("stable_notes"), 0, 9),
             "missed_notes": _bounded_number(metrics.get("missed_notes"), 0, 9),
-            "octave_error_notes": _bounded_number(
-                metrics.get("octave_error_notes"), 0, 9,
+            "register_offset_semitones": _bounded_number(
+                metrics.get("register_offset_semitones"), -36, 36,
+            ),
+            "rejected_samples": _sanitize_rejected_samples(
+                metrics.get("rejected_samples"),
             ),
         },
         **_sanitize_feedback(attempt),
@@ -100,6 +112,9 @@ def _sanitize_siren_attempt(attempt: Any) -> dict[str, Any] | None:
                 metrics.get("smooth_movement_percent"), 0, 100,
             ),
             "interruptions": _bounded_number(metrics.get("interruptions"), 0, 100),
+            "rejected_samples": _sanitize_rejected_samples(
+                metrics.get("rejected_samples"),
+            ),
         },
         **_sanitize_feedback(attempt),
     }

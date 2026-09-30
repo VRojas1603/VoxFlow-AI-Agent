@@ -22,7 +22,8 @@ function createAttempt(exerciseId) {
           medianDeviationCents: 18,
           stableNotes: 7,
           missedNotes: 1,
-          octaveErrorNotes: 0,
+          registerOffsetSemitones: -12,
+          rejectedSamples: { quiet: 2, unclear: 1, outOfRange: 0 },
         }
       : {
           rangeSemitones: 19.5,
@@ -31,6 +32,7 @@ function createAttempt(exerciseId) {
           directionMatchPercent: 91,
           smoothMovementPercent: 76,
           interruptions: 0,
+          rejectedSamples: { quiet: 1, unclear: 0, outOfRange: 0 },
         },
     strengths: ['The measured pitch was consistent.'],
     focusAreas: ['Keep the upper part of the exercise connected.'],
@@ -90,6 +92,8 @@ test('serializes measured attempts without adding an overall score', () => {
   const text = serializeSessionReport(report);
 
   assert.match(text, /Detected notes: 8\/9/);
+  assert.match(text, /Register alignment: -12 semitones/);
+  assert.match(text, /Rejected samples: quiet 2, unclear 1, out of range 0/);
   assert.match(text, /Continuity: 82%/);
   assert.match(text, /Session Feedback/);
   assert.doesNotMatch(text, /overall score/i);
@@ -157,6 +161,7 @@ test('builds the bounded performance payload sent for final voice feedback', () 
   assert.equal(summary.duration_seconds, 180);
   assert.equal(summary.breathing_cycles, 1);
   assert.equal(summary.lip_trill_attempts[0].metrics.detected_notes, 8);
+  assert.equal(summary.lip_trill_attempts[0].metrics.register_offset_semitones, -12);
   assert.equal(summary.vocal_siren_attempts[0].metrics.continuity_percent, 82);
   assert.match(summary.deterministic_feedback.next_action, /Repeat the exercise/);
 });

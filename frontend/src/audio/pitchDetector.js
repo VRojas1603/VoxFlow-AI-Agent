@@ -8,7 +8,31 @@ export const DEFAULT_PITCH_TRACKING_CONFIG = Object.freeze({
   maximumFrequencyHz: 1100,
   minimumClarity: 0.85,
   minimumRms: 0.015,
+  clarityThreshold: 0.9,
+  noiseFloorMultiplier: 2.5,
+  medianWindowSize: 1,
+  octaveJumpGuard: false,
 });
+
+export const LIP_TRILL_PITCH_TRACKING_CONFIG = Object.freeze({
+  ...DEFAULT_PITCH_TRACKING_CONFIG,
+  inputLength: 4096,
+  minimumClarity: 0.65,
+  minimumRms: 0.008,
+  clarityThreshold: 0.8,
+  noiseFloorMultiplier: 1.75,
+  medianWindowSize: 3,
+  octaveJumpGuard: true,
+});
+
+export const PITCH_TRACKING_PROFILES = Object.freeze({
+  default: DEFAULT_PITCH_TRACKING_CONFIG,
+  lip_trill: LIP_TRILL_PITCH_TRACKING_CONFIG,
+});
+
+export function getPitchTrackingConfig(profile = 'default') {
+  return PITCH_TRACKING_PROFILES[profile] || DEFAULT_PITCH_TRACKING_CONFIG;
+}
 
 export function calculateRms(buffer) {
   if (!buffer?.length) return 0;
@@ -48,6 +72,7 @@ export function createPitchAnalyzer(overrides = {}) {
     ...overrides,
   };
   const detector = PitchDetector.forFloat32Array(config.inputLength);
+  detector.clarityThreshold = config.clarityThreshold;
 
   return {
     inputLength: config.inputLength,
@@ -115,6 +140,64 @@ export function createPitchAnalyzer(overrides = {}) {
           signalQuality: 'valid',
           ...pitch,
         },
+      };
+    },
+  };
+}
+
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function midiToFrequency(midiFloat) {
+  return 440 * (2 ** ((midiFloat - 69) / 12));
+}
+
+export function createPitchSampleStabilizer({
+  medianWindowSize = 1,
+  octaveJumpGuard = false,
+} = {}) {
+  let recentMidiValues = [];
+  let previousMidi = null;
+
+  return {
+    reset() {
+      recentMidiValues = [];
+      previousMidi = null;
+    },
+
+    stabilize(sample) {
+      let candidateMidi = sample.midiFloat;
+      if (octaveJumpGuard && Number.isFinite(previousMidi)) {
+        const candidates = [candidateMidi, candidateMidi - 12, candidateMidi + 12];
+        const closest = candidates.reduce((best, candidate) => (
+          Math.abs(candidate - previousMidi) < Math.abs(best - previousMidi)
+            ? candidate
+            : best
+        ));
+        if (
+          Math.abs(candidateMidi - previousMidi) >= 7
+          && Math.abs(closest - previousMidi) <= 4
+        ) {
+          candidateMidi = closest;
+        }
+      }
+
+      recentMidiValues.push(candidateMidi);
+      if (recentMidiValues.length > medianWindowSize) recentMidiValues.shift();
+      const stabilizedMidi = median(recentMidiValues);
+      const frequencyHz = midiToFrequency(stabilizedMidi);
+      previousMidi = stabilizedMidi;
+
+      return {
+        ...sample,
+        frequencyHz,
+        freq: Math.round(frequencyHz * 10) / 10,
+        ...frequencyToPitch(frequencyHz),
       };
     },
   };
