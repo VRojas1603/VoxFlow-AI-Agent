@@ -43,11 +43,11 @@ def get_exercises():
             "description": "Smooth continuous glissando from lowest to highest pitch without breaks."
         },
         {
-            "id": "song_practice",
-            "name": "Free Song Practice",
-            "category": "Repertoire",
-            "duration": "5 min",
-            "description": "Sing a phrase or section of your choice and receive immediate vocal coach feedback."
+            "id": "notes_practice",
+            "name": "Notes Practice",
+            "category": "Pitch Control",
+            "duration": "3 min",
+            "description": "Match four target notes in sequence and hold each pitch steadily for half a second."
         }
     ]
 
@@ -84,5 +84,11 @@ def get_tips():
             "title": "Vocal Sirens",
             "explanation": "Glide smoothly like a siren using the vowel 'OO' or 'OH' without cracking or pushing.",
             "icon": "activity"
+        },
+        {
+            "tip_type": "notes_practice",
+            "title": "Notes Practice",
+            "explanation": "Match the highlighted target note and hold it steadily until it turns green, then continue to the next note.",
+            "icon": "target"
         }
     ]

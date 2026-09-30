@@ -1,5 +1,9 @@
 function getAttemptCount(performance) {
-  return performance.lipTrillAttempts.length + performance.sirenAttempts.length;
+  return (
+    performance.lipTrillAttempts.length
+    + performance.sirenAttempts.length
+    + (performance.notesPracticeAttempts?.length || 0)
+  );
 }
 
 function buildFallbackFeedback(performance) {
@@ -61,6 +65,7 @@ export function buildSessionReport({
     breathingCycles: performance.breathingCycles,
     lipTrillAttempts: [...performance.lipTrillAttempts],
     sirenAttempts: [...performance.sirenAttempts],
+    notesPracticeAttempts: [...(performance.notesPracticeAttempts || [])],
     evaluatedAttempts: getAttemptCount(performance),
     tipsCovered: [...tipsCovered],
     languageSwitches,
@@ -128,6 +133,33 @@ function mapSirenAttempt(attempt) {
   };
 }
 
+function mapNotesPracticeAttempt(attempt) {
+  return {
+    attempt_number: attempt.attemptNumber,
+    signal_quality: attempt.signalQuality,
+    metrics: {
+      completed_notes: attempt.metrics.completedNotes,
+      expected_notes: attempt.metrics.expectedNotes,
+      completion_percent: attempt.metrics.completionPercent,
+      median_deviation_cents: attempt.metrics.medianDeviationCents,
+      valid_samples: attempt.metrics.validSamples,
+      rejected_samples: {
+        quiet: attempt.metrics.rejectedSamples.quiet,
+        unclear: attempt.metrics.rejectedSamples.unclear,
+        out_of_range: attempt.metrics.rejectedSamples.outOfRange,
+      },
+      note_results: attempt.metrics.noteResults.map((note) => ({
+        note_name: note.noteName,
+        frequency_hz: note.frequencyHz,
+        completed: note.completed,
+        time_to_match_ms: note.timeToMatchMs,
+        best_deviation_cents: note.bestDeviationCents,
+      })),
+    },
+    ...mapFeedback(attempt),
+  };
+}
+
 export function buildAgentPerformanceSummary({ durationSeconds, performance }) {
   const fallbackFeedback = buildFallbackFeedback(performance);
   return {
@@ -135,6 +167,7 @@ export function buildAgentPerformanceSummary({ durationSeconds, performance }) {
     breathing_cycles: performance.breathingCycles,
     lip_trill_attempts: performance.lipTrillAttempts.map(mapLipTrillAttempt),
     vocal_siren_attempts: performance.sirenAttempts.map(mapSirenAttempt),
+    notes_practice_attempts: (performance.notesPracticeAttempts || []).map(mapNotesPracticeAttempt),
     deterministic_feedback: {
       text: fallbackFeedback.text,
       next_action: fallbackFeedback.nextAction,
@@ -157,13 +190,31 @@ function formatAttempt(attempt) {
     ].join('\n');
   }
 
-  return [
+  if (attempt.exerciseId === 'warmup_sirens') return [
     `Attempt ${attempt.attemptNumber}: ${attempt.signalQuality}`,
     `  Range covered: ${attempt.metrics.rangeSemitones} semitones`,
     `  Continuity: ${attempt.metrics.continuityPercent}%`,
     `  Direction match: ${attempt.metrics.directionMatchPercent}%`,
     `  Smooth movement: ${attempt.metrics.smoothMovementPercent}%`,
     `  Rejected samples: quiet ${attempt.metrics.rejectedSamples.quiet}, unclear ${attempt.metrics.rejectedSamples.unclear}, out of range ${attempt.metrics.rejectedSamples.outOfRange}`,
+    `  Focus: ${attempt.focusAreas[0]}`,
+    `  Next action: ${attempt.nextAction}`,
+  ].join('\n');
+
+  const noteResults = attempt.metrics.noteResults
+    .map((note) => [
+      `  ${note.noteName} (${note.frequencyHz} Hz): ${note.completed ? 'Done' : 'Incomplete'}${note.timeToMatchMs === null ? '' : ` in ${note.timeToMatchMs} ms`}`,
+      `    Best deviation: ${note.bestDeviationCents === null ? 'not available' : `${note.bestDeviationCents} cents`}`,
+    ].join('\n'))
+    .join('\n');
+  return [
+    `Attempt ${attempt.attemptNumber}: ${attempt.signalQuality}`,
+    `  Completed notes: ${attempt.metrics.completedNotes}/${attempt.metrics.expectedNotes}`,
+    `  Completion: ${attempt.metrics.completionPercent}%`,
+    `  Median deviation: ${attempt.metrics.medianDeviationCents} cents`,
+    noteResults,
+    `  Rejected samples: quiet ${attempt.metrics.rejectedSamples.quiet}, unclear ${attempt.metrics.rejectedSamples.unclear}, out of range ${attempt.metrics.rejectedSamples.outOfRange}`,
+    `  Strength: ${attempt.strengths[0]}`,
     `  Focus: ${attempt.focusAreas[0]}`,
     `  Next action: ${attempt.nextAction}`,
   ].join('\n');
@@ -183,6 +234,9 @@ export function serializeSessionReport(report) {
   const sirens = report.sirenAttempts.length
     ? report.sirenAttempts.map(formatAttempt).join('\n\n')
     : 'No completed vocal siren attempts.';
+  const notesPractice = report.notesPracticeAttempts.length
+    ? report.notesPracticeAttempts.map(formatAttempt).join('\n\n')
+    : 'No completed notes practice attempts.';
 
   return `
 === VoxFlow Vocal Coaching Session Report ===
@@ -202,6 +256,9 @@ ${lipTrills}
 
 -- Vocal Siren Performance --
 ${sirens}
+
+-- Notes Practice Performance --
+${notesPractice}
 
 -- Vocal Techniques & Tips Covered --
 ${tips}

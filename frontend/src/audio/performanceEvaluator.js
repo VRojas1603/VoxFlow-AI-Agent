@@ -8,6 +8,7 @@ export function createEmptySessionPerformance() {
     breathingCycles: 0,
     lipTrillAttempts: [],
     sirenAttempts: [],
+    notesPracticeAttempts: [],
     lastAttempt: null,
   };
 }
@@ -419,11 +420,26 @@ export class SessionPerformanceTracker {
     return summary;
   }
 
+  recordNotesPracticeAttempt(attempt) {
+    if (!attempt || attempt.exerciseId !== 'notes_practice') return null;
+    const summary = {
+      ...attempt,
+      attemptNumber: this.performance.notesPracticeAttempts.length + 1,
+    };
+    this.performance = {
+      ...this.performance,
+      notesPracticeAttempts: [...this.performance.notesPracticeAttempts, summary],
+      lastAttempt: summary,
+    };
+    return summary;
+  }
+
   getSnapshot() {
     return {
       ...this.performance,
       lipTrillAttempts: [...this.performance.lipTrillAttempts],
       sirenAttempts: [...this.performance.sirenAttempts],
+      notesPracticeAttempts: [...this.performance.notesPracticeAttempts],
     };
   }
 }

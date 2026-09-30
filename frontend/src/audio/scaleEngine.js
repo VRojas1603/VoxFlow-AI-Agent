@@ -1,6 +1,6 @@
 /**
  * Web Audio Scale & Accompaniment Synthesis Engine for VoxFlow.
- * Generates acoustic piano-style warm-up scales, metronome pulses, and chord progressions.
+ * Generates acoustic piano-style warm-up scales and metronome pulses.
  */
 
 // Frequency lookup helper for MIDI notes (A4 = 440 Hz, MIDI 69)
@@ -434,56 +434,6 @@ export class ScaleEngine {
         this.stepIndex = (this.stepIndex + 1) % 2;
         completesAttempt = this.stepIndex === 0;
         stepDelayMs = (duration + 0.3) * 1000;
-        break;
-      }
-
-      case 'song_practice': {
-        // Pop Chord Progression: C (60,64,67) -> G (55,59,62) -> Am (57,60,64) -> F (53,57,60)
-        const chords = [
-          [60, 64, 67], // C Major
-          [55, 59, 62], // G Major
-          [57, 60, 64], // A Minor
-          [53, 57, 60], // F Major
-        ];
-        const chordIndex = Math.floor(this.stepIndex / 4) % chords.length;
-        const chordNotes = chords[chordIndex];
-        const attemptId = this.ensureAttemptId();
-
-        // Play arpeggiated piano strum
-        chordNotes.forEach((midi, i) => {
-          const timeoutId = setTimeout(() => {
-            this.scheduledTimeouts.delete(timeoutId);
-            if (this.isPlaying) {
-              this.playSynthNote(midi, 1.2 / this.speed, 0.6, {
-                attemptId,
-                sequenceIndex: chordIndex,
-                sequenceLength: chords.length,
-              });
-            }
-          }, i * 60);
-          this.scheduledTimeouts.add(timeoutId);
-        });
-
-        const chordNames = ['C Major', 'G Major', 'A Minor', 'F Major'];
-        this.emitTarget({
-          eventType: 'target.started',
-          targetType: 'chord',
-          exerciseId: this.currentExercise,
-          attemptId,
-          startedAt: this.audioCtx.currentTime,
-          timelineStartedAtMs: getTimelineTimeMs(),
-          durationMs: Math.round(1000 / this.speed),
-          sequenceIndex: chordIndex,
-          sequenceLength: chords.length,
-          noteName: `${chordNames[chordIndex]} (Chord Progression)`,
-          freq: Math.round(midiToFreq(chordNotes[0] + this.pitchShift)),
-          frequencyHz: midiToFreq(chordNotes[0] + this.pitchShift),
-          midiNote: chordNotes[0] + this.pitchShift,
-        });
-
-        this.stepIndex = (this.stepIndex + 1) % (chords.length * 4);
-        if (this.stepIndex === 0) this.currentAttemptId = null;
-        stepDelayMs = (1000 / this.speed);
         break;
       }
 

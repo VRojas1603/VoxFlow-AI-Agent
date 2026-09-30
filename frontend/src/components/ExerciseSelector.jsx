@@ -15,6 +15,7 @@ import {
   Radio,
   Sparkles,
 } from 'lucide-react';
+import { NotesPracticePanel } from './NotesPracticePanel';
 
 const EXERCISES = [
   {
@@ -42,11 +43,11 @@ const EXERCISES = [
     icon: Activity,
   },
   {
-    id: 'song_practice',
-    name: 'Free Song Practice',
-    category: 'Repertoire',
-    duration: '5 min',
-    desc: 'Looping acoustic piano chord progression with real-time feedback.',
+    id: 'notes_practice',
+    name: 'Notes Practice',
+    category: 'Pitch Control',
+    duration: '3 min',
+    desc: 'Match four target notes in order using live pitch feedback.',
     icon: Music2,
   },
 ];
@@ -63,6 +64,7 @@ export function ExerciseSelector({
   onVolumeChange,
   onPitchAdjust,
   onSpeedAdjust,
+  notesPractice,
   disabled = false,
 }) {
   const pitchShift = playbackSettings?.pitchShift || 0;
@@ -71,6 +73,7 @@ export function ExerciseSelector({
     accompanimentStart?.phase === 'countdown'
     || accompanimentStart?.phase === 'waiting_for_voice'
   );
+  const isNotesPractice = activeExercise === 'notes_practice';
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/50 p-5 backdrop-blur-sm flex flex-col gap-4">
@@ -90,8 +93,8 @@ export function ExerciseSelector({
         <div className="flex items-center gap-2 text-xs bg-slate-800/80 px-2.5 py-1 rounded-lg text-purple-300 border border-purple-500/20">
           <Sliders className="w-3.5 h-3.5 text-purple-400" />
           <span>Key: {pitchShift >= 0 ? `+${pitchShift}` : pitchShift} st</span>
-          <span>•</span>
-          <span>Speed: {speed}x</span>
+          {!isNotesPractice && <span>•</span>}
+          {!isNotesPractice && <span>Speed: {speed}x</span>}
         </div>
       </div>
 
@@ -139,7 +142,16 @@ export function ExerciseSelector({
         })}
       </div>
 
-      {/* Interactive Scale Accompaniment & Reference Player Bar */}
+      {isNotesPractice ? (
+        <NotesPracticePanel
+          practice={notesPractice}
+          startState={accompanimentStart}
+          pitchShift={pitchShift}
+          onToggle={onToggleAccompaniment}
+          onPitchAdjust={onPitchAdjust}
+          disabled={disabled}
+        />
+      ) : (
       <div className="rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-950/40 via-slate-900/60 to-slate-900/40 p-3.5 flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Play/Stop Button & Live Note Status */}
@@ -263,6 +275,7 @@ export function ExerciseSelector({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -29,6 +29,7 @@ export function App() {
     currentNote,
     pitchData,
     pitchSignalQuality,
+    notesPractice,
     accompanimentVolume,
     setAccompanimentVolume,
     adjustPitchManually,
@@ -178,6 +179,7 @@ export function App() {
               onVolumeChange={setAccompanimentVolume}
               onPitchAdjust={adjustPitchManually}
               onSpeedAdjust={adjustSpeedManually}
+              notesPractice={notesPractice}
               disabled={isSessionReview}
             />
           </div>
@@ -187,7 +189,9 @@ export function App() {
             {/* Real-time Vocal Pitch & Tuning Gauge */}
             <PitchMonitor
               isListening={isListening}
-              targetNote={currentNote}
+              targetNote={activeExercise === 'notes_practice'
+                ? notesPractice.targets[notesPractice.activeIndex] || null
+                : currentNote}
               pitchData={pitchData}
               signalQuality={pitchSignalQuality}
             />

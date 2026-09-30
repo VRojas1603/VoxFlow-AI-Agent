@@ -265,3 +265,28 @@ test('evaluates an octave-aligned siren across both directions', () => {
   assert.equal(summary.metrics.medianContourDeviationCents, 0);
   assert.equal(tracker.getSnapshot().sirenAttempts.length, 1);
 });
+
+test('records Notes Practice summaries in session performance', () => {
+  const tracker = new SessionPerformanceTracker();
+  const summary = tracker.recordNotesPracticeAttempt({
+    attemptId: 'notes-practice-1',
+    exerciseId: 'notes_practice',
+    signalQuality: 'partial',
+    metrics: {
+      completedNotes: 2,
+      expectedNotes: 4,
+      completionPercent: 50,
+      medianDeviationCents: 12,
+      validSamples: 24,
+      rejectedSamples: { quiet: 1, unclear: 0, outOfRange: 0 },
+      noteResults: [],
+    },
+    strengths: ['Two target notes were matched.'],
+    focusAreas: ['Complete the remaining notes.'],
+    nextAction: 'Repeat the pattern.',
+  });
+
+  assert.equal(summary.attemptNumber, 1);
+  assert.equal(tracker.getSnapshot().notesPracticeAttempts.length, 1);
+  assert.equal(tracker.getSnapshot().lastAttempt.exerciseId, 'notes_practice');
+});

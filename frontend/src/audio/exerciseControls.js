@@ -2,7 +2,7 @@ export const EXERCISE_NAMES = Object.freeze({
   warmup_breathing: 'Diaphragmatic Breathing',
   warmup_lip_trill: 'Lip Trill Scale',
   warmup_sirens: 'Vocal Sirens',
-  song_practice: 'Free Song Practice',
+  notes_practice: 'Notes Practice',
 });
 
 export function applyExerciseSelection(engine, exerciseId) {

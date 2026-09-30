@@ -40,6 +40,32 @@ function createAttempt(exerciseId) {
   };
 }
 
+function createNotesPracticeAttempt() {
+  return {
+    attemptId: 'notes-practice-1',
+    exerciseId: 'notes_practice',
+    attemptNumber: 1,
+    signalQuality: 'partial',
+    metrics: {
+      completedNotes: 3,
+      expectedNotes: 4,
+      completionPercent: 75,
+      medianDeviationCents: 16.5,
+      validSamples: 36,
+      rejectedSamples: { quiet: 2, unclear: 1, outOfRange: 0 },
+      noteResults: [
+        { noteName: 'C4', frequencyHz: 261.6, completed: true, timeToMatchMs: 700, bestDeviationCents: 5 },
+        { noteName: 'D4', frequencyHz: 293.7, completed: true, timeToMatchMs: 840, bestDeviationCents: 7 },
+        { noteName: 'E4', frequencyHz: 329.6, completed: true, timeToMatchMs: 910, bestDeviationCents: 8 },
+        { noteName: 'F4', frequencyHz: 349.2, completed: false, timeToMatchMs: null, bestDeviationCents: 43 },
+      ],
+    },
+    strengths: ['You matched three target notes.'],
+    focusAreas: ['The final note needs a steadier hold.'],
+    nextAction: 'Repeat the pattern and hold F4 for half a second.',
+  };
+}
+
 test('builds one report model for the inline view and download', () => {
   const lipTrill = createAttempt('warmup_lip_trill');
   const report = buildSessionReport({
@@ -148,13 +174,15 @@ test('uses the spoken agent feedback in the completed report', () => {
 test('builds the bounded performance payload sent for final voice feedback', () => {
   const lipTrill = createAttempt('warmup_lip_trill');
   const siren = createAttempt('warmup_sirens');
+  const notesPractice = createNotesPracticeAttempt();
   const summary = buildAgentPerformanceSummary({
     durationSeconds: 180,
     performance: {
       breathingCycles: 1,
       lipTrillAttempts: [lipTrill],
       sirenAttempts: [siren],
-      lastAttempt: siren,
+      notesPracticeAttempts: [notesPractice],
+      lastAttempt: notesPractice,
     },
   });
 
@@ -163,5 +191,37 @@ test('builds the bounded performance payload sent for final voice feedback', () 
   assert.equal(summary.lip_trill_attempts[0].metrics.detected_notes, 8);
   assert.equal(summary.lip_trill_attempts[0].metrics.register_offset_semitones, -12);
   assert.equal(summary.vocal_siren_attempts[0].metrics.continuity_percent, 82);
-  assert.match(summary.deterministic_feedback.next_action, /Repeat the exercise/);
+  assert.equal(summary.notes_practice_attempts[0].metrics.completed_notes, 3);
+  assert.equal(summary.notes_practice_attempts[0].metrics.note_results[0].note_name, 'C4');
+  assert.match(summary.deterministic_feedback.next_action, /hold F4/i);
+});
+
+test('includes Notes Practice metrics in the downloadable report', () => {
+  const notesPractice = createNotesPracticeAttempt();
+  const report = buildSessionReport({
+    durationFormatted: '03:20',
+    exercisesPracticed: ['Notes Practice'],
+    tipsCovered: [],
+    languageSwitches: 0,
+    keyShiftsUsed: 1,
+    speedChangesUsed: 0,
+    volumeChangesUsed: 0,
+    messageCount: 10,
+    performance: {
+      breathingCycles: 0,
+      lipTrillAttempts: [],
+      sirenAttempts: [],
+      notesPracticeAttempts: [notesPractice],
+      lastAttempt: notesPractice,
+    },
+    completedAt: new Date('2026-09-30T15:00:00.000Z'),
+  });
+
+  const text = serializeSessionReport(report);
+
+  assert.equal(report.evaluatedAttempts, 1);
+  assert.match(text, /Notes Practice Performance/);
+  assert.match(text, /Completed notes: 3\/4/);
+  assert.match(text, /C4 \(261\.6 Hz\): Done in 700 ms/);
+  assert.match(text, /F4 \(349\.2 Hz\): Incomplete/);
 });

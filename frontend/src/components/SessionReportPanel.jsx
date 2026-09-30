@@ -40,18 +40,28 @@ function AttemptCard({ title, attempt, type }) {
     );
   }
 
-  const metrics = type === 'lip_trill'
-    ? [
+  let metrics;
+  if (type === 'lip_trill') {
+    metrics = [
         ['Detected notes', `${attempt.metrics.detectedNotes}/${attempt.metrics.expectedNotes}`],
         ['Within tolerance', `${attempt.metrics.withinTolerancePercent}%`],
         ['Median deviation', `${attempt.metrics.medianDeviationCents}¢`],
         ['Register alignment', `${attempt.metrics.registerOffsetSemitones >= 0 ? '+' : ''}${attempt.metrics.registerOffsetSemitones} st`],
-      ]
-    : [
+      ];
+  } else if (type === 'notes_practice') {
+    metrics = [
+      ['Completed notes', `${attempt.metrics.completedNotes}/${attempt.metrics.expectedNotes}`],
+      ['Completion', `${attempt.metrics.completionPercent}%`],
+      ['Median deviation', `${attempt.metrics.medianDeviationCents}¢`],
+      ['Valid samples', attempt.metrics.validSamples],
+    ];
+  } else {
+    metrics = [
         ['Range', `${attempt.metrics.rangeSemitones} semitones`],
         ['Continuity', `${attempt.metrics.continuityPercent}%`],
         ['Direction match', `${attempt.metrics.directionMatchPercent}%`],
       ];
+  }
   const rejectedSamples = attempt.metrics.rejectedSamples;
 
   return (
@@ -74,7 +84,24 @@ function AttemptCard({ title, attempt, type }) {
       <p className="m-0 text-[11px] text-slate-500">
         Capture diagnostics: {rejectedSamples.quiet} quiet, {rejectedSamples.unclear} unclear, {rejectedSamples.outOfRange} out of range.
       </p>
-      <p className="m-0 text-xs leading-relaxed text-slate-400">{attempt.focusAreas[0]}</p>
+      {type === 'notes_practice' && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {attempt.metrics.noteResults.map((note) => (
+            <div key={note.noteName} className="rounded-lg border border-slate-800 bg-slate-950/50 px-2.5 py-2 text-[10px] text-slate-400">
+              <strong className="block text-xs text-white">{note.noteName} · {note.frequencyHz} Hz</strong>
+              <span className={note.completed ? 'text-emerald-300' : 'text-amber-300'}>
+                {note.completed ? `Done in ${note.timeToMatchMs} ms` : 'Incomplete'}
+              </span>
+              <span className="mt-0.5 block">Best: {note.bestDeviationCents ?? '—'}¢</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="space-y-1 text-xs leading-relaxed text-slate-400">
+        <p className="m-0"><strong className="text-slate-300">Strength:</strong> {attempt.strengths[0]}</p>
+        <p className="m-0"><strong className="text-slate-300">Focus:</strong> {attempt.focusAreas[0]}</p>
+        <p className="m-0"><strong className="text-slate-300">Next action:</strong> {attempt.nextAction}</p>
+      </div>
     </div>
   );
 }
@@ -82,6 +109,7 @@ function AttemptCard({ title, attempt, type }) {
 export function SessionReportPanel({ report, onSetUpNewSession, actionsDisabled = false }) {
   const latestLipTrill = report.lipTrillAttempts.at(-1);
   const latestSiren = report.sirenAttempts.at(-1);
+  const latestNotesPractice = report.notesPracticeAttempts.at(-1);
 
   return (
     <div className="relative z-10 px-1 py-2 sm:px-3" aria-labelledby="session-report-title">
@@ -110,9 +138,10 @@ export function SessionReportPanel({ report, onSetUpNewSession, actionsDisabled 
           <Metric label="Evaluated attempts" value={report.evaluatedAttempts} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           <AttemptCard title="Latest Lip Trill" attempt={latestLipTrill} type="lip_trill" />
           <AttemptCard title="Latest Vocal Siren" attempt={latestSiren} type="siren" />
+          <AttemptCard title="Latest Notes Practice" attempt={latestNotesPractice} type="notes_practice" />
         </div>
 
         <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/45 to-slate-900/60 p-4 flex items-start gap-3">
