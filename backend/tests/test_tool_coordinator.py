@@ -21,6 +21,10 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_reply_done_sends_exact_tool_result(self):
         self.coordinator.register("call-1", "show_vocal_tip", {"tip_type": "lip_trill"})
+        self.coordinator.set_client_result(
+            "call-1",
+            {"status": "success", "applied": True, "tip_type": "lip_trill"},
+        )
         self.assertEqual(self.sent, [])
 
         await self.coordinator.finish_reply()
@@ -28,13 +32,15 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.sent, [{
             "type": "tool.result",
             "call_id": "call-1",
-            "result": '{"status": "success", "applied": true}',
+            "result": '{"status": "success", "applied": true, "tip_type": "lip_trill"}',
             "is_error": False,
         }])
 
     async def test_reply_done_flushes_all_pending_calls(self):
         self.coordinator.register("call-2", "select_exercise", {})
         self.coordinator.register("call-3", "adjust_music_playback", {})
+        self.coordinator.set_client_result("call-2", {"status": "success"})
+        self.coordinator.set_client_result("call-3", {"status": "success"})
 
         await self.coordinator.finish_reply()
 
@@ -48,14 +54,17 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.sent, [])
 
-    async def test_safety_timeout_sends_result_without_reply_done(self):
+    async def test_timeout_sends_error_after_reply_done(self):
         coordinator = ToolCallCoordinator(self.capture, timeout_seconds=0.01)
         coordinator.register("call-5", "select_exercise", {})
 
         await asyncio.sleep(0.03)
+        await coordinator.finish_reply()
 
         self.assertEqual(self.sent[0]["type"], "tool.result")
         self.assertEqual(self.sent[0]["call_id"], "call-5")
+        self.assertTrue(self.sent[0]["is_error"])
+        self.assertIn('"applied": false', self.sent[0]["result"])
         coordinator.cancel_all()
 
     async def test_cancel_all_prevents_timeout_result(self):
@@ -69,6 +78,7 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_end_session_is_sent_after_tool_result(self):
         self.coordinator.register("call-7", "end_session", {})
+        self.coordinator.set_client_result("call-7", {"status": "success", "applied": True})
 
         pending = await finish_tool_reply(
             self.coordinator,
@@ -95,6 +105,47 @@ class ToolCallCoordinatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(pending)
         self.assertEqual(self.sent, [])
+
+    async def test_client_error_is_forwarded_to_agent(self):
+        self.coordinator.register("call-9", "control_accompaniment", {"action": "play"})
+        self.coordinator.set_client_result(
+            "call-9",
+            {"status": "error", "applied": False, "message": "Audio unavailable"},
+            is_error=True,
+        )
+
+        await self.coordinator.finish_reply()
+
+        self.assertTrue(self.sent[0]["is_error"])
+        self.assertIn("Audio unavailable", self.sent[0]["result"])
+
+    async def test_reply_waits_for_client_execution_result(self):
+        self.coordinator.register("call-11", "control_accompaniment", {"action": "stop"})
+
+        finish_task = asyncio.create_task(self.coordinator.finish_reply())
+        await asyncio.sleep(0)
+
+        self.assertFalse(finish_task.done())
+        self.assertEqual(self.sent, [])
+
+        self.coordinator.set_client_result(
+            "call-11",
+            {"status": "success", "applied": True, "playback": "stopped"},
+        )
+        await finish_task
+
+        self.assertEqual(self.sent[0]["call_id"], "call-11")
+        self.assertIn('"playback": "stopped"', self.sent[0]["result"])
+
+    async def test_duplicate_call_and_result_are_ignored(self):
+        self.assertTrue(self.coordinator.register("call-10", "control_accompaniment", {"action": "play"}))
+        self.assertFalse(self.coordinator.register("call-10", "control_accompaniment", {"action": "play"}))
+        self.assertTrue(self.coordinator.set_client_result("call-10", {"status": "success"}))
+        self.assertFalse(self.coordinator.set_client_result("call-10", {"status": "success"}))
+
+        await self.coordinator.finish_reply()
+
+        self.assertEqual(len(self.sent), 1)
 
 
 if __name__ == "__main__":

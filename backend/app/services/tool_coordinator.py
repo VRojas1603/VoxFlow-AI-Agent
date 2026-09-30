@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 
@@ -12,6 +12,9 @@ SendEvent = Callable[[dict], Awaitable[None]]
 class PendingToolCall:
     name: str
     arguments: Any
+    result: Any = None
+    is_error: bool = False
+    result_ready: asyncio.Event = field(default_factory=asyncio.Event)
     timeout_task: Optional[asyncio.Task] = None
 
 
@@ -31,15 +34,37 @@ class ToolCallCoordinator:
         self._pending: dict[str, PendingToolCall] = {}
         self._lock = asyncio.Lock()
 
-    def register(self, call_id: str, name: str, arguments: Any) -> None:
-        previous = self._pending.pop(call_id, None)
-        if previous and previous.timeout_task:
-            previous.timeout_task.cancel()
+    def register(self, call_id: str, name: str, arguments: Any) -> bool:
+        if call_id in self._pending:
+            self._logger.warning("Ignoring duplicate tool.call [id=%s]", call_id)
+            return False
 
         pending = PendingToolCall(name=name, arguments=arguments)
         pending.timeout_task = asyncio.create_task(self._timeout(call_id))
         self._pending[call_id] = pending
         self._logger.info("Queued tool.call [tool=%s, id=%s]", name, call_id)
+        return True
+
+    def set_client_result(
+        self,
+        call_id: str,
+        result: Any,
+        *,
+        is_error: bool = False,
+    ) -> bool:
+        pending = self._pending.get(call_id)
+        if pending is None:
+            self._logger.warning("Ignoring result for unknown tool call [id=%s]", call_id)
+            return False
+        if pending.result_ready.is_set():
+            self._logger.warning("Ignoring duplicate tool result [id=%s]", call_id)
+            return False
+
+        pending.result = result
+        pending.is_error = is_error
+        pending.result_ready.set()
+        self._logger.info("Received client tool result [tool=%s, id=%s]", pending.name, call_id)
+        return True
 
     async def finish_reply(self, *, interrupted: bool = False) -> None:
         if interrupted:
@@ -50,8 +75,10 @@ class ToolCallCoordinator:
             self.cancel_all()
             return
 
-        for call_id in list(self._pending):
-            await self._send_result(call_id)
+        await asyncio.gather(*(
+            self._send_result(call_id)
+            for call_id in list(self._pending)
+        ))
 
     async def _timeout(self, call_id: str) -> None:
         try:
@@ -59,14 +86,21 @@ class ToolCallCoordinator:
         except asyncio.CancelledError:
             return
 
-        if call_id not in self._pending:
+        pending = self._pending.get(call_id)
+        if pending is None or pending.result_ready.is_set():
             return
 
         self._logger.warning(
-            "Sending tool.result through safety timeout [id=%s]",
+            "Client tool execution timed out [id=%s]",
             call_id,
         )
-        await self._send_result(call_id)
+        pending.result = {
+            "status": "error",
+            "applied": False,
+            "message": "The browser did not confirm that the action was applied.",
+        }
+        pending.is_error = True
+        pending.result_ready.set()
 
     async def _send_result(self, call_id: str) -> None:
         async with self._lock:
@@ -74,11 +108,13 @@ class ToolCallCoordinator:
             if pending is None:
                 return
 
+            await pending.result_ready.wait()
+
             await self._send_event({
                 "type": "tool.result",
                 "call_id": call_id,
-                "result": json.dumps({"status": "success", "applied": True}),
-                "is_error": False,
+                "result": json.dumps(pending.result),
+                "is_error": pending.is_error,
             })
 
             self._pending.pop(call_id, None)

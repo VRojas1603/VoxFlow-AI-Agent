@@ -63,6 +63,7 @@ export function useVoiceAgent() {
   const languageSwitchesCountRef = useRef(0);
   const keyShiftsCountRef = useRef(0);
   const speedChangesCountRef = useRef(0);
+  const processedToolCallsRef = useRef(new Map());
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
@@ -210,7 +211,7 @@ export function useVoiceAgent() {
       try {
         parameters = JSON.parse(parameters);
       } catch {
-        console.warn('Could not parse tool parameters:', parameters);
+        throw new Error('Could not parse tool parameters.');
       }
     }
 
@@ -220,8 +221,10 @@ export function useVoiceAgent() {
       const lang = parameters.language || 'en';
       setVoiceProfile((current) => ({ ...current, language: lang }));
       languageSwitchesCountRef.current += 1;
+      return { status: 'success', applied: true, language: lang };
     } else if (name === 'end_session') {
       pendingVoiceEndRef.current = true;
+      return { status: 'success', applied: true };
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
         tipType: parameters.tip_type || 'posture',
@@ -231,6 +234,31 @@ export function useVoiceAgent() {
       };
       setActiveTip(tipObj);
       tipsCoveredRef.current.push(tipObj);
+      return { status: 'success', applied: true, tip_type: tipObj.tipType };
+    } else if (name === 'control_accompaniment') {
+      const action = parameters.action;
+      if (action === 'play') {
+        const wasPlaying = scaleEngine.isPlaying;
+        if (!wasPlaying) scaleEngine.start();
+        setIsPlayingAccompaniment(true);
+        return {
+          status: 'success',
+          applied: !wasPlaying,
+          playback: 'playing',
+          exercise_id: scaleEngine.currentExercise,
+        };
+      }
+      if (action === 'stop') {
+        const wasPlaying = scaleEngine.isPlaying;
+        scaleEngine.stop();
+        setIsPlayingAccompaniment(false);
+        return {
+          status: 'success',
+          applied: wasPlaying,
+          playback: 'stopped',
+        };
+      }
+      throw new Error(`Unsupported accompaniment action: ${action || 'missing'}`);
     } else if (name === 'adjust_music_playback') {
       if (parameters.pitch_shift !== undefined) keyShiftsCountRef.current += 1;
       if (parameters.playback_speed !== undefined) speedChangesCountRef.current += 1;
@@ -241,6 +269,7 @@ export function useVoiceAgent() {
         scaleEngine.setSpeed(nextSpeed);
         return { pitchShift: nextPitch, speed: nextSpeed };
       });
+      return { status: 'success', applied: true };
     } else if (name === 'select_exercise') {
       if (parameters.exercise_id) {
         const exNames = {
@@ -252,8 +281,16 @@ export function useVoiceAgent() {
         setActiveExercise(parameters.exercise_id);
         scaleEngine.setExercise(parameters.exercise_id);
         exercisesPracticedRef.current.add(exNames[parameters.exercise_id] || parameters.exercise_id);
+        return {
+          status: 'success',
+          applied: true,
+          exercise_id: parameters.exercise_id,
+        };
       }
+      throw new Error('Exercise selection requires an exercise_id.');
     }
+
+    throw new Error(`Unsupported tool: ${name || 'unknown'}`);
   }, []);
 
   // Connect to the Voice Agent
@@ -268,6 +305,7 @@ export function useVoiceAgent() {
       setAgentTranscript('');
       setActiveTip(null);
       pendingVoiceEndRef.current = false;
+      processedToolCallsRef.current.clear();
       setVoiceProfile({
         language: getVoiceLanguage(selectedVoice),
         voice: selectedVoice,
@@ -412,7 +450,42 @@ export function useVoiceAgent() {
 
           // 10. Tool Calling
           if (eventType === 'tool.call' || eventType === 'tool_call') {
-            handleToolCall(message.tool || message);
+            const toolData = message.tool || message;
+            const callId = toolData.call_id || toolData.id || message.call_id || message.id;
+            if (!callId) {
+              console.warn('Tool call received without call_id:', toolData);
+              return;
+            }
+
+            let outcome = processedToolCallsRef.current.get(callId);
+            if (!outcome) {
+              try {
+                outcome = {
+                  result: handleToolCall(toolData),
+                  is_error: false,
+                };
+              } catch (toolError) {
+                console.error(`[Tool Execution Error]: ${toolData.name || 'unknown'}`, toolError);
+                outcome = {
+                  result: {
+                    status: 'error',
+                    applied: false,
+                    message: toolError instanceof Error ? toolError.message : 'Tool execution failed.',
+                  },
+                  is_error: true,
+                };
+              }
+              processedToolCallsRef.current.set(callId, outcome);
+            }
+
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'client.tool_result',
+                call_id: callId,
+                result: outcome.result,
+                is_error: outcome.is_error,
+              }));
+            }
             return;
           }
 

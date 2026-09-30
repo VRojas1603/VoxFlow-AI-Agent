@@ -99,7 +99,25 @@ async def handle_agent_proxy(client_ws: WebSocket):
                         if "bytes" in data and data["bytes"]:
                             await send_to_aai(data["bytes"])
                         elif "text" in data and data["text"]:
-                            await send_to_aai(data["text"])
+                            text = data["text"]
+                            try:
+                                event = json.loads(text)
+                            except json.JSONDecodeError:
+                                event = None
+
+                            if isinstance(event, dict) and event.get("type") == "client.tool_result":
+                                call_id = event.get("call_id")
+                                if call_id:
+                                    tool_coordinator.set_client_result(
+                                        call_id,
+                                        event.get("result", {}),
+                                        is_error=bool(event.get("is_error")),
+                                    )
+                                else:
+                                    logger.warning("Ignoring client.tool_result without call_id")
+                                continue
+
+                            await send_to_aai(text)
                 except (WebSocketDisconnect, asyncio.CancelledError):
                     pass
                 except RuntimeError as e:

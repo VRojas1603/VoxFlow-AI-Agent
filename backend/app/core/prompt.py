@@ -33,7 +33,7 @@ Core Language & Code-Switching Rules:
 6. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
 7. Proactive Leadership & Immediate Action:
    - Act as an energetic, proactive coach leading the session.
-   - When the user asks to change speed, adjust pitch, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('adjust_music_playback', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN using sensible default values (e.g., playback_speed=0.85 or pitch_shift=-2).
+   - When the user asks to start or stop the accompaniment, change speed, adjust pitch, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('control_accompaniment', 'adjust_music_playback', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN using sensible default values (e.g., playback_speed=0.85 or pitch_shift=-2).
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
 8. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
 9. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
@@ -96,6 +96,26 @@ VOICE_TOOLS = [
                 "explanation": {"type": "string", "description": "1-2 sentence explanation of how to execute the technique"},
             },
             "required": ["tip_type", "title", "explanation"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "control_accompaniment",
+        "description": "Starts or stops the accompaniment track. Call this whenever the user asks to play, start, pause, or stop the accompaniment, scale, track, or music.",
+        "response_instructions": {
+            "success": "Briefly confirm the actual playback state reported by the tool result.",
+            "error": "Briefly say that the accompaniment action could not be applied.",
+        },
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["play", "stop"],
+                    "description": "Use 'play' to start playback and 'stop' to stop or pause it.",
+                }
+            },
+            "required": ["action"],
         },
     },
     {
