@@ -18,9 +18,9 @@ def _bounded_number(
 ) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
         return minimum
-    bounded = min(maximum, max(minimum, float(value)))
+    bounded = min(float(maximum), max(float(minimum), float(value)))
     rounded = round(bounded, precision)
-    return int(rounded) if rounded.is_integer() else rounded
+    return int(rounded) if rounded == int(rounded) else rounded
 
 
 def _bounded_text(value: Any) -> str:
