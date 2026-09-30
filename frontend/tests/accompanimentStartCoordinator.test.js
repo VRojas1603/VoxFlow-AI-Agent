@@ -59,6 +59,42 @@ function createCoordinator(overrides = {}) {
   return { coordinator, events, scheduler };
 }
 
+test('default browser timers retain their required global receiver', () => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  let scheduledTimer = null;
+  let clearedTimer = null;
+
+  globalThis.setTimeout = function browserSetTimeout(callback, delay) {
+    assert.equal(this, globalThis);
+    scheduledTimer = { callback, delay };
+    return 42;
+  };
+  globalThis.clearTimeout = function browserClearTimeout(timerId) {
+    assert.equal(this, globalThis);
+    clearedTimer = timerId;
+  };
+
+  try {
+    const coordinator = new AccompanimentStartCoordinator({
+      startPlayback: () => {},
+      playReadyCue: () => {},
+    });
+
+    coordinator.requestStart({
+      source: 'manual',
+      exerciseId: 'warmup_breathing',
+    });
+
+    assert.equal(scheduledTimer?.delay, 1000);
+    coordinator.cancel();
+    assert.equal(clearedTimer, 42);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
 test('manual playback starts only after the full countdown', () => {
   const { coordinator, events, scheduler } = createCoordinator();
 

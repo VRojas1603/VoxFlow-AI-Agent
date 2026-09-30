@@ -22,8 +22,8 @@ export class AccompanimentStartCoordinator {
     tickIntervalMs = 1000,
     voiceWaitTimeoutMs = 15000,
     postCueDelayMs = 250,
-    setTimer = setTimeout,
-    clearTimer = clearTimeout,
+    setTimer = (...args) => globalThis.setTimeout(...args),
+    clearTimer = (...args) => globalThis.clearTimeout(...args),
   }) {
     this.startPlayback = startPlayback;
     this.playReadyCue = playReadyCue;
