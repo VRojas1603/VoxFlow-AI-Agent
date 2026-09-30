@@ -36,6 +36,161 @@ At the end of a session, Lyra receives a bounded performance summary and speaks 
 - English and Spanish voice options selected before each session. The selected voice remains fixed while the session is active.
 - Secure FastAPI WebSocket proxy; the AssemblyAI API key never reaches the browser.
 
+## Guided demo flow
+
+This walkthrough lets judges and first-time users validate VoxFlow's main voice controls, local pitch measurement, and evidence-based session feedback in about 5–7 minutes. Lyra's exact wording may vary, but the interface actions and measured results should follow the behavior described below.
+
+### Before you start
+
+- Open the [live VoxFlow application](https://vox-flow-ai-agent.vercel.app).
+- Allow microphone access when the browser requests it.
+- Use headphones so the accompaniment does not feed back into the microphone.
+- Choose a voice and select **Start with Lyra**.
+- Use a quiet environment for clearer pitch detection.
+
+### 1. Start with breathing
+
+Say:
+
+```text
+User: "Let's start with diaphragmatic breathing."
+User: "How do I do this exercise properly?"
+```
+
+Lyra selects **Diaphragmatic Breathing**. Selecting an exercise does not display a tip automatically; the explicit explanation request makes Lyra speak the instructions and show the tip card.
+
+Then say:
+
+```text
+User: "Play the accompaniment."
+```
+
+Lyra gives a short confirmation, a `3–2–1` countdown appears, and the accompaniment starts after the countdown.
+
+### 2. Test exercise transitions and playback controls
+
+Say:
+
+```text
+User: "Move to the Lip Trill Scale."
+User: "What can you tell me about this exercise?"
+User: "Play the accompaniment."
+User: "Set the speed to 0.85x."
+User: "Lower the key by two semitones."
+User: "Raise the key by two semitones."
+User: "Increase the volume by ten percent."
+User: "Stop the accompaniment."
+```
+
+Expected behavior:
+
+- Changing exercises stops the previous accompaniment and clears the previous tip.
+- The contextual question makes Lyra explain the currently selected exercise.
+- Key changes are relative: lowering the initial key from `0` produces `−2`, and raising it by two returns it to `0`.
+- Speed, key, volume, and playback changes appear in the interface.
+- Lyra confirms the resulting setting instead of only repeating the requested change.
+
+### 3. Test protected vocal practice
+
+Say:
+
+```text
+User: "Move to Vocal Sirens."
+User: "How do I perform this exercise?"
+User: "Play the accompaniment."
+```
+
+After the countdown, make a sustained `mmm` sound while gliding from low to high and back down.
+
+Expected behavior:
+
+- The **Vocal Pitch & Tuning Monitor** reacts to the vocal signal.
+- Pitch measurement and exercise evaluation run locally in the browser.
+- Sustained practice sounds do not appear as Chinese words or ordinary chat messages.
+- Lyra remains silent during the measured attempt and does not invent immediate performance feedback.
+
+### 4. Test Notes Practice
+
+Say:
+
+```text
+User: "Switch to Notes Practice."
+User: "How does this exercise work?"
+User: "Lower the key by two semitones."
+User: "Start practice."
+```
+
+Expected behavior:
+
+- Four transposed target notes appear.
+- A `3–2–1` countdown starts before measurement begins.
+- The notes become active sequentially.
+- Holding the active note within `±30 cents` for 500 ms marks it as **Done**.
+- Completing all four notes ends the attempt automatically.
+- Notes Practice runs without accompaniment.
+- Vocalizations remain local and do not trigger conversational replies.
+
+### 5. Finish the session
+
+Say:
+
+```text
+User: "That will be all for today."
+```
+
+Expected behavior:
+
+- Lyra does not give an immediate generic farewell.
+- The voice orb transitions to the report loading view while VoxFlow processes the measured attempts.
+- Lyra speaks one evidence-based strength, one improvement area, and one next action.
+- The visual report displays the same grounded feedback.
+- **Download Report** exports the complete session report.
+- **Start New Session** restores the voice selection and initial session view.
+
+### Optional agent behavior checks
+
+#### Barge-in
+
+While Lyra is speaking, say:
+
+```text
+User: "Move to Vocal Sirens."
+```
+
+Lyra should stop the current response and process the new request.
+
+#### Language switching
+
+Say:
+
+```text
+User: "Ahora explícame cómo puedo mejorar mi afinación."
+User: "Let's continue in English."
+```
+
+Lyra should change between Spanish and English, update the language indicator, and keep the voice selected at the beginning of the session.
+
+#### Partial Notes Practice attempt
+
+Start Notes Practice and stop after completing one target note:
+
+```text
+User: "Start practice."
+User: "Stop practice."
+```
+
+The report should include a partial attempt. Stopping before completing any note cancels the attempt without adding an empty result.
+
+#### Unsupported accompaniment
+
+While Notes Practice is selected, say:
+
+```text
+User: "Play the accompaniment."
+```
+
+Lyra should explain that Notes Practice uses target-note matching without background accompaniment and keep the session active.
+
 ## Architecture
 
 ```mermaid
