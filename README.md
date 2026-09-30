@@ -20,7 +20,7 @@ The four available exercises are:
 1. **Diaphragmatic Breathing** — a timed breathing pattern with metronome guidance.
 2. **Lip Trill Scale** — a guided nine-note scale with pitch, stability, and octave-alignment measurements.
 3. **Vocal Sirens** — continuous upward and downward glides evaluated for range, continuity, direction, and smoothness.
-4. **Notes Practice** — sequential C4–D4–E4–F4 targets that can be transposed from −6 to +6 semitones. Each note must remain within ±30 cents for 500 ms before the next target unlocks.
+4. **Notes Practice** — sequential F♯3–G♯3–A♯3–B3 targets (approximately 185–247 Hz) that can be transposed from −6 to +6 semitones. Each note must remain within ±30 cents for 500 ms before the next target unlocks.
 
 At the end of a session, Lyra receives a bounded performance summary and speaks coaching feedback based on the measured results. The interface replaces the voice orb with a visual report that can also be downloaded as a text file.
 
