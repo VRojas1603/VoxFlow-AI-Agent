@@ -23,10 +23,23 @@ function holdTarget(tracker, midiNote, startAtMs) {
   }
 }
 
-test('transposes all four notes from the C major starting fragment', () => {
+test('starts with four lower notes between approximately 185 and 247 Hz', () => {
+  const targets = createNotesPracticeTargets(0);
+
+  assert.deepEqual(
+    targets.map((target) => target.noteName),
+    ['F#3', 'G#3', 'A#3', 'B3'],
+  );
+  assert.deepEqual(
+    targets.map((target) => target.frequencyHz),
+    [185, 207.7, 233.1, 246.9],
+  );
+});
+
+test('transposes all four lower targets with the key control', () => {
   assert.deepEqual(
     createNotesPracticeTargets(-2).map((target) => target.noteName),
-    ['A#3', 'C4', 'D4', 'D#4'],
+    ['E3', 'F#3', 'G#3', 'A3'],
   );
 });
 
@@ -37,16 +50,16 @@ test('completes notes sequentially after holding within tolerance', () => {
   });
   tracker.start(0, 1000);
 
-  holdTarget(tracker, 62, 1000);
+  holdTarget(tracker, 56, 1000);
   assert.equal(tracker.getSnapshot().activeIndex, 0);
 
-  holdTarget(tracker, 60, 2000);
+  holdTarget(tracker, 54, 2000);
   assert.equal(tracker.getSnapshot().targets[0].status, 'done');
   assert.equal(tracker.getSnapshot().activeIndex, 1);
 
-  holdTarget(tracker, 62, 3000);
-  holdTarget(tracker, 64, 4000);
-  holdTarget(tracker, 65, 5000);
+  holdTarget(tracker, 56, 3000);
+  holdTarget(tracker, 58, 4000);
+  holdTarget(tracker, 59, 5000);
 
   assert.equal(tracker.getSnapshot().status, 'completed');
   assert.equal(summaries.length, 1);
@@ -57,9 +70,9 @@ test('completes notes sequentially after holding within tolerance', () => {
 test('resets hold progress after a gap longer than 120 ms', () => {
   const tracker = new NotesPracticeTracker();
   tracker.start(0, 1000);
-  tracker.handleAnalysis(sample(60, 1000));
-  tracker.handleAnalysis(sample(60, 1080));
-  tracker.handleAnalysis(sample(60, 1280));
+  tracker.handleAnalysis(sample(54, 1000));
+  tracker.handleAnalysis(sample(54, 1080));
+  tracker.handleAnalysis(sample(54, 1280));
 
   assert.equal(tracker.getSnapshot().targets[0].holdProgress, 0);
 });
@@ -73,7 +86,7 @@ test('records partial attempts and discards empty attempts', () => {
   assert.equal(tracker.stop(1200).recorded, false);
 
   tracker.start(0, 2000);
-  holdTarget(tracker, 60, 2000);
+  holdTarget(tracker, 54, 2000);
   const result = tracker.stop(3000);
 
   assert.equal(result.recorded, true);

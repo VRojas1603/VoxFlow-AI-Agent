@@ -1,7 +1,7 @@
 import { midiToFreq, midiToNoteName } from './scaleEngine.js';
 
 export const NOTES_PRACTICE_EXERCISE_ID = 'notes_practice';
-export const NOTES_PRACTICE_BASE_MIDI = Object.freeze([60, 62, 64, 65]);
+export const NOTES_PRACTICE_BASE_MIDI = Object.freeze([54, 56, 58, 59]);
 export const NOTES_PRACTICE_TOLERANCE_CENTS = 30;
 export const NOTES_PRACTICE_HOLD_MS = 500;
 export const NOTES_PRACTICE_MAX_GAP_MS = 120;
