@@ -38,7 +38,7 @@ export function App() {
     sessionView,
     reportGenerationStep,
     sessionReport,
-    startNewSession,
+    setUpNewSession,
     sessionSeconds,
     errorMessage,
     selectedVoice,
@@ -56,13 +56,17 @@ export function App() {
     setActiveTip(null);
   };
 
-  const isSessionReview = sessionView !== 'voice';
-  const isVoicePanel = sessionView === 'voice' || sessionView === 'voice_exiting';
+  const isSessionReview = !['voice', 'voice_setup'].includes(sessionView);
+  const isVoicePanel = (
+    sessionView === 'voice'
+    || sessionView === 'voice_setup'
+    || sessionView === 'voice_exiting'
+  );
   const isLoadingPanel = (
     sessionView === 'generating_report' || sessionView === 'loading_exiting'
   );
   const isReportPanel = (
-    sessionView === 'report_ready' || sessionView === 'starting_new_session'
+    sessionView === 'report_ready' || sessionView === 'returning_to_setup'
   );
 
   return (
@@ -104,8 +108,8 @@ export function App() {
                 status={status}
                 isSpeaking={isSpeaking}
                 isListening={isListening}
-                agentTranscript={agentTranscript}
-                userTranscript={userTranscript}
+                agentTranscript={sessionView === 'voice_setup' ? '' : agentTranscript}
+                userTranscript={sessionView === 'voice_setup' ? '' : userTranscript}
                 getMicAnalyser={getMicAnalyser}
                 getPlayerAnalyser={getPlayerAnalyser}
               />
@@ -119,11 +123,11 @@ export function App() {
           )}
 
           {isReportPanel && sessionReport && (
-            <div className={sessionView === 'starting_new_session' ? 'animate-slide-out-right' : 'animate-slide-in-left'}>
+            <div className={sessionView === 'returning_to_setup' ? 'animate-slide-out-right' : 'animate-slide-in-left'}>
               <SessionReportPanel
                 report={sessionReport}
-                onStartNewSession={startNewSession}
-                actionsDisabled={sessionView === 'starting_new_session'}
+                onSetUpNewSession={setUpNewSession}
+                actionsDisabled={sessionView === 'returning_to_setup'}
               />
             </div>
           )}

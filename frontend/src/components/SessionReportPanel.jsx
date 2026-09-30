@@ -79,7 +79,7 @@ function AttemptCard({ title, attempt, type }) {
   );
 }
 
-export function SessionReportPanel({ report, onStartNewSession, actionsDisabled = false }) {
+export function SessionReportPanel({ report, onSetUpNewSession, actionsDisabled = false }) {
   const latestLipTrill = report.lipTrillAttempts.at(-1);
   const latestSiren = report.sirenAttempts.at(-1);
 
@@ -150,10 +150,10 @@ export function SessionReportPanel({ report, onStartNewSession, actionsDisabled 
           <button
             type="button"
             disabled={actionsDisabled}
-            onClick={onStartNewSession}
+            onClick={onSetUpNewSession}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 px-5 py-2.5 text-xs font-semibold text-white shadow-lg shadow-purple-600/25 transition-all hover:from-purple-500 hover:to-pink-500 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
-            <RotateCcw className="w-4 h-4" /> Start New Session
+            <RotateCcw className="w-4 h-4" /> Set Up New Session
           </button>
         </div>
       </div>

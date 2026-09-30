@@ -16,7 +16,7 @@ export function Header({
 }) {
   const isConnected = status === 'connected';
   const isConnecting = status === 'connecting';
-  const isReportReady = sessionView === 'report_ready' || sessionView === 'starting_new_session';
+  const isReportReady = sessionView === 'report_ready' || sessionView === 'returning_to_setup';
   const activeVoice = getVoice(voiceProfile?.voice);
 
   const mins = Math.floor(sessionSeconds / 60);

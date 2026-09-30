@@ -876,13 +876,15 @@ export function useVoiceAgent() {
     finishSession();
   }, [finishSession]);
 
-  const startNewSession = useCallback(() => {
+  const setUpNewSession = useCallback(() => {
     clearReportTransitionTimers();
-    setSessionView('starting_new_session');
+    setSessionView('returning_to_setup');
     scheduleReportTransition(() => {
-      connect();
+      setSessionView('voice_setup');
+      setReportGenerationStep('analyzing');
+      setErrorMessage(null);
     }, 320);
-  }, [clearReportTransitionTimers, connect, scheduleReportTransition]);
+  }, [clearReportTransitionTimers, scheduleReportTransition]);
 
   return {
     status,
@@ -916,7 +918,7 @@ export function useVoiceAgent() {
     sessionView,
     reportGenerationStep,
     sessionReport,
-    startNewSession,
+    setUpNewSession,
     sessionSeconds,
     errorMessage,
     selectedVoice,
