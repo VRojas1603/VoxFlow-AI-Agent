@@ -22,6 +22,8 @@ export function SessionSummaryModal({ isOpen, onClose, stats, onStartNewSession 
     tipsCovered = [],
     languageSwitches = 0,
     keyShiftsUsed = 0,
+    speedChangesUsed = 0,
+    volumeChangesUsed = 0,
     messageCount = 0,
   } = stats;
 
@@ -41,6 +43,8 @@ ${exercisesPracticed.length > 0 ? exercisesPracticed.map((ex) => `• ${ex}`).jo
 ${tipsCovered.length > 0 ? tipsCovered.map((tip) => `• ${tip.title}: ${tip.explanation}`).join('\n') : '• General vocal warm-up'}
 
 Key Pitch Shifts Tested: ${keyShiftsUsed}
+Playback Speed Changes: ${speedChangesUsed}
+Accompaniment Volume Changes: ${volumeChangesUsed}
 
 Lyra's Recommendation for Next Session:
 "Keep focusing on low diaphragmatic breath support before high register notes, and maintain relaxed jaw posture during vocal sirens."
@@ -113,6 +117,19 @@ Lyra's Recommendation for Next Session:
             <span className="text-[10px] text-slate-400">Languages</span>
             <span className="text-sm font-bold text-white">{languageSwitches > 0 ? 'EN & ES' : 'English'}</span>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 rounded-xl border border-slate-800/80 bg-slate-900/40 px-3 py-2 text-[11px] text-slate-300">
+          <span className="flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-purple-400" />
+            Key shifts: <strong className="text-white">{keyShiftsUsed}</strong>
+          </span>
+          <span>
+            Speed changes: <strong className="text-white">{speedChangesUsed}</strong>
+          </span>
+          <span>
+            Volume changes: <strong className="text-white">{volumeChangesUsed}</strong>
+          </span>
         </div>
 
         {/* Techniques & Exercises Practiced List */}

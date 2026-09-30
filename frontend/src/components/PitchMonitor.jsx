@@ -9,8 +9,7 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
 
   useEffect(() => {
     if (!isListening || !getMicAnalyser) {
-      setPitchData(null);
-      return;
+      return undefined;
     }
 
     const checkPitch = () => {
@@ -48,7 +47,8 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
     };
   }, [getMicAnalyser, isListening]);
 
-  const cents = pitchData?.cents || 0;
+  const visiblePitchData = isListening ? pitchData : null;
+  const cents = visiblePitchData?.cents || 0;
   // Map cents (-50 to +50) to percentage (0% to 100%)
   const meterPercent = Math.max(0, Math.min(100, ((cents + 50) / 100) * 100));
 
@@ -68,27 +68,27 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
 
         {/* Status Indicator */}
         {isListening ? (
-          pitchData && !pitchData.isDecaying ? (
+          visiblePitchData && !visiblePitchData.isDecaying ? (
             <span
               className={`px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1 border ${
-                pitchData.isInTune
+                visiblePitchData.isInTune
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                  : pitchData.isFlat
+                  : visiblePitchData.isFlat
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                   : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
               }`}
             >
-              {pitchData.isInTune ? (
+              {visiblePitchData.isInTune ? (
                 <>
                   <CheckCircle2 className="w-3 h-3" /> In Tune
                 </>
-              ) : pitchData.isFlat ? (
+              ) : visiblePitchData.isFlat ? (
                 <>
-                  <AlertCircle className="w-3 h-3" /> Flat ({pitchData.cents}¢)
+                  <AlertCircle className="w-3 h-3" /> Flat ({visiblePitchData.cents}¢)
                 </>
               ) : (
                 <>
-                  <AlertCircle className="w-3 h-3" /> Sharp (+{pitchData.cents}¢)
+                  <AlertCircle className="w-3 h-3" /> Sharp (+{visiblePitchData.cents}¢)
                 </>
               )}
             </span>
@@ -108,19 +108,19 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
         <div className="flex items-center gap-3">
           <div
             className={`w-14 h-14 rounded-xl flex items-center justify-center font-bold text-xl border transition-all ${
-              pitchData && !pitchData.isDecaying
-                ? pitchData.isInTune
+              visiblePitchData && !visiblePitchData.isDecaying
+                ? visiblePitchData.isInTune
                   ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-lg shadow-emerald-950/40'
                   : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-lg shadow-cyan-950/40'
                 : 'bg-slate-900 text-slate-600 border-slate-800'
             }`}
           >
-            {pitchData && !pitchData.isDecaying ? pitchData.noteName : '—'}
+            {visiblePitchData && !visiblePitchData.isDecaying ? visiblePitchData.noteName : '—'}
           </div>
           <div>
             <span className="text-xs text-slate-400 block">Sung Pitch</span>
             <span className="text-sm font-semibold text-white">
-              {pitchData && !pitchData.isDecaying ? `${pitchData.freq} Hz` : '0.0 Hz'}
+              {visiblePitchData && !visiblePitchData.isDecaying ? `${visiblePitchData.freq} Hz` : '0.0 Hz'}
             </span>
           </div>
         </div>
@@ -147,16 +147,16 @@ export function PitchMonitor({ getMicAnalyser, isListening, targetNote }) {
 
         <div className="relative w-full h-3 bg-slate-950 rounded-full border border-slate-800 overflow-hidden">
           {/* Center in-tune zone indicator */}
-          <div className="absolute left-[40%] width-[20%] h-full w-[20%] bg-emerald-500/15" />
+          <div className="absolute left-[40%] h-full w-[20%] bg-emerald-500/15" />
           <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-0.5 bg-emerald-400/60 z-10" />
 
           {/* Needle / Indicator indicator */}
-          {pitchData && !pitchData.isDecaying && (
+          {visiblePitchData && !visiblePitchData.isDecaying && (
             <div
               className={`absolute top-0 bottom-0 w-3 -ml-1.5 rounded-full transition-all duration-75 shadow-md ${
-                pitchData.isInTune
+                visiblePitchData.isInTune
                   ? 'bg-emerald-400 shadow-emerald-400/50 scale-y-125'
-                  : pitchData.isFlat
+                  : visiblePitchData.isFlat
                   ? 'bg-amber-400 shadow-amber-400/50'
                   : 'bg-rose-400 shadow-rose-400/50'
               }`}

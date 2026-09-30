@@ -9,6 +9,7 @@ export class StreamingPCMPlayer {
     this.nextStartTime = 0;
     this.activeSources = [];
     this.isPlaying = false;
+    this.idleWaiters = new Set();
   }
 
   async init() {
@@ -93,8 +94,37 @@ export class StreamingPCMPlayer {
       }
       if (this.activeSources.length === 0) {
         this.isPlaying = false;
+        this.resolveIdleWaiters();
       }
     };
+  }
+
+  /**
+   * Resolves when every queued voice chunk has finished, with a timeout fallback.
+   */
+  waitForIdle(timeoutMs = 15000) {
+    if (this.activeSources.length === 0) {
+      return Promise.resolve({ timedOut: false });
+    }
+
+    return new Promise((resolve) => {
+      let timeoutId;
+      const finish = (timedOut = false) => {
+        if (timeoutId) clearTimeout(timeoutId);
+        this.idleWaiters.delete(finish);
+        resolve({ timedOut });
+      };
+
+      this.idleWaiters.add(finish);
+      timeoutId = setTimeout(() => finish(true), timeoutMs);
+    });
+  }
+
+  resolveIdleWaiters(timedOut = false) {
+    const waiters = Array.from(this.idleWaiters);
+    for (const finish of waiters) {
+      finish(timedOut);
+    }
   }
 
   /**
@@ -105,12 +135,13 @@ export class StreamingPCMPlayer {
       try {
         source.stop();
         source.disconnect();
-      } catch (e) {
+      } catch {
         // Ignore if already stopped
       }
     }
     this.activeSources = [];
     this.isPlaying = false;
+    this.resolveIdleWaiters();
     if (this.audioCtx) {
       this.nextStartTime = this.audioCtx.currentTime;
     }

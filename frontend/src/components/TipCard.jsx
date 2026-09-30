@@ -29,7 +29,7 @@ export function TipCard({ activeTip, onClose }) {
   const badge = getTipBadge(activeTip.tipType);
 
   return (
-    <div className="relative rounded-2xl border border-purple-500/40 bg-gradient-to-br from-slate-900/90 to-purple-950/40 p-5 shadow-xl shadow-purple-950/30 transition-all animate-in fade-in slide-in-from-top-2">
+    <div className="relative rounded-2xl border border-purple-500/40 bg-gradient-to-br from-slate-900/90 to-purple-950/40 p-5 shadow-xl shadow-purple-950/30 transition-all animate-fade-slide-in">
       {/* Header bar */}
       <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">

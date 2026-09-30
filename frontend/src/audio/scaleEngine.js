@@ -29,6 +29,8 @@ export class ScaleEngine {
     this.stepIndex = 0;
     this.baseKeyOffset = 0; // For automatic ascension in lip trills
     this.onNoteChangeCallback = null;
+    this.activeSources = new Set();
+    this.scheduledTimeouts = new Set();
   }
 
   init() {
@@ -74,6 +76,14 @@ export class ScaleEngine {
     this.onNoteChangeCallback = cb;
   }
 
+  trackSource(source) {
+    this.activeSources.add(source);
+    source.addEventListener('ended', () => {
+      this.activeSources.delete(source);
+    }, { once: true });
+    return source;
+  }
+
   /**
    * Synthesize a single acoustic note with a warm, natural piano-like ADSR envelope.
    */
@@ -105,6 +115,9 @@ export class ScaleEngine {
     osc2.connect(noteGain);
     noteGain.connect(this.masterGain);
 
+    this.trackSource(osc1);
+    this.trackSource(osc2);
+
     osc1.start(now);
     osc2.start(now);
     osc1.stop(now + durationSec + 0.05);
@@ -121,7 +134,7 @@ export class ScaleEngine {
   }
 
   /**
-   * Play continuous glissando sweep for Vocal Sirens exercise.
+   * Play continuous glissando sweep for Vocal Sirens exercise with lowpass smoothing.
    */
   playGlissando(startMidi, endMidi, durationSec) {
     if (!this.audioCtx) this.init();
@@ -130,19 +143,28 @@ export class ScaleEngine {
     const now = this.audioCtx.currentTime;
 
     const osc = this.audioCtx.createOscillator();
+    const filter = this.audioCtx.createBiquadFilter();
     const gain = this.audioCtx.createGain();
 
     osc.type = 'sine';
     osc.frequency.setValueAtTime(startFreq, now);
     osc.frequency.exponentialRampToValueAtTime(endFreq, now + durationSec);
 
+    // Warm Low-Pass Filter at 650 Hz to eliminate piercing high harmonics
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(650, now);
+
+    // Gentle, comfortable volume gain envelope (0.15 peak)
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.5, now + 0.1);
-    gain.gain.setValueAtTime(0.5, now + durationSec - 0.1);
+    gain.gain.linearRampToValueAtTime(0.15, now + 0.15);
+    gain.gain.setValueAtTime(0.15, now + durationSec - 0.15);
     gain.gain.linearRampToValueAtTime(0.001, now + durationSec);
 
-    osc.connect(gain);
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(this.masterGain);
+
+    this.trackSource(osc);
 
     osc.start(now);
     osc.stop(now + durationSec + 0.05);
@@ -173,6 +195,8 @@ export class ScaleEngine {
 
     osc.connect(gain);
     gain.connect(this.masterGain);
+
+    this.trackSource(osc);
 
     osc.start(now);
     osc.stop(now + 0.09);
@@ -272,11 +296,13 @@ export class ScaleEngine {
 
         // Play arpeggiated piano strum
         chordNotes.forEach((midi, i) => {
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
+            this.scheduledTimeouts.delete(timeoutId);
             if (this.isPlaying) {
               this.playSynthNote(midi, 1.2 / this.speed, 0.6);
             }
           }, i * 60);
+          this.scheduledTimeouts.add(timeoutId);
         });
 
         const chordNames = ['C Major', 'G Major', 'A Minor', 'F Major'];
@@ -311,6 +337,18 @@ export class ScaleEngine {
       clearTimeout(this.timerId);
       this.timerId = null;
     }
+    for (const timeoutId of this.scheduledTimeouts) {
+      clearTimeout(timeoutId);
+    }
+    this.scheduledTimeouts.clear();
+    for (const source of this.activeSources) {
+      try {
+        source.stop();
+      } catch {
+        // The source may have already stopped naturally.
+      }
+    }
+    this.activeSources.clear();
     if (this.onNoteChangeCallback) {
       this.onNoteChangeCallback(null);
     }

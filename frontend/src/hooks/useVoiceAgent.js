@@ -1,8 +1,27 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { StreamingPCMPlayer } from '../audio/pcmPlayer';
 import { scaleEngine } from '../audio/scaleEngine';
+import {
+  DEFAULT_ACCOMPANIMENT_STATE,
+  applyAccompanimentAdjustment,
+  resetAccompanimentEngine,
+} from '../audio/accompanimentControls';
+import {
+  EXERCISE_NAMES,
+  applyExerciseSelection,
+  upsertCoveredTip,
+} from '../audio/exerciseControls';
+import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
+
+function getAgentWebSocketUrl(voice) {
+  const url = new URL(WS_URL, window.location.href);
+  if (url.protocol === 'http:') url.protocol = 'ws:';
+  if (url.protocol === 'https:') url.protocol = 'wss:';
+  url.searchParams.set('voice', voice);
+  return url.toString();
+}
 
 // Helper to convert ArrayBuffer (16-bit PCM) to Base64
 function arrayBufferToBase64(buffer) {
@@ -23,13 +42,22 @@ export function useVoiceAgent() {
   const [agentTranscript, setAgentTranscript] = useState('');
   const [conversation, setConversation] = useState([]);
   const [activeTip, setActiveTip] = useState(null);
-  const [playbackSettings, setPlaybackSettings] = useState({ pitchShift: 0, speed: 1.0 });
+  const [playbackSettings, setPlaybackSettings] = useState({
+    pitchShift: DEFAULT_ACCOMPANIMENT_STATE.pitchShift,
+    speed: DEFAULT_ACCOMPANIMENT_STATE.speed,
+  });
   const [activeExercise, setActiveExercise] = useState('warmup_breathing');
   const [isPlayingAccompaniment, setIsPlayingAccompaniment] = useState(false);
   const [currentNote, setCurrentNote] = useState(null);
-  const [accompanimentVolume, setAccompanimentVolumeState] = useState(0.4);
+  const [accompanimentVolume, setAccompanimentVolumeState] = useState(
+    DEFAULT_ACCOMPANIMENT_STATE.volume,
+  );
   const [errorMessage, setErrorMessage] = useState(null);
-  const [voiceProfile, setVoiceProfile] = useState({ language: 'en', voice: 'eve' });
+  const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE_ID);
+  const [voiceProfile, setVoiceProfile] = useState({
+    language: getVoiceLanguage(DEFAULT_VOICE_ID),
+    voice: DEFAULT_VOICE_ID,
+  });
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [summaryStats, setSummaryStats] = useState(null);
   const [sessionSeconds, setSessionSeconds] = useState(0);
@@ -42,10 +70,16 @@ export function useVoiceAgent() {
   const micAnalyserRef = useRef(null);
   const sessionTimerRef = useRef(null);
   const sessionSecondsRef = useRef(0);
+  const sessionActiveRef = useRef(false);
+  const pendingVoiceEndRef = useRef(false);
+  const conversationRef = useRef([]);
   const exercisesPracticedRef = useRef(new Set(['Diaphragmatic Breathing']));
   const tipsCoveredRef = useRef([]);
   const languageSwitchesCountRef = useRef(0);
   const keyShiftsCountRef = useRef(0);
+  const speedChangesCountRef = useRef(0);
+  const volumeChangesCountRef = useRef(0);
+  const processedToolCallsRef = useRef(new Map());
 
   // Initialize PCM streaming audio player (AssemblyAI native 24 kHz) and Scale Engine callback
   useEffect(() => {
@@ -112,7 +146,7 @@ export function useVoiceAgent() {
   };
 
   // Stop microphone capture
-  const stopMicrophone = () => {
+  const stopMicrophone = useCallback(() => {
     if (micAnalyserRef.current) {
       micAnalyserRef.current.disconnect();
       micAnalyserRef.current = null;
@@ -130,19 +164,105 @@ export function useVoiceAgent() {
       audioCtxRef.current = null;
     }
     setIsListening(false);
-  };
+  }, []);
 
-  // Switch voice dynamically
-  const switchVoiceManual = useCallback((lang, voiceName) => {
-    const targetVoice = voiceName || (lang === 'es' ? 'lola' : 'eve');
-    setVoiceProfile({ language: lang, voice: targetVoice });
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'change_voice',
-        voice: targetVoice,
-        language: lang,
-      }));
+  const selectVoice = useCallback((voiceId) => {
+    setSelectedVoice(voiceId);
+    setVoiceProfile({
+      language: getVoiceLanguage(voiceId),
+      voice: voiceId,
+    });
+  }, []);
+
+  const finishSession = useCallback(({ closeSocket = true } = {}) => {
+    const hadActiveSession = sessionActiveRef.current;
+    sessionActiveRef.current = false;
+    pendingVoiceEndRef.current = false;
+
+    const socket = wsRef.current;
+    if (closeSocket && socket) {
+      wsRef.current = null;
+      socket.close();
     }
+
+    stopMicrophone();
+    pcmPlayerRef.current?.stopAll();
+    scaleEngine.stop();
+    setIsPlayingAccompaniment(false);
+    setStatus('disconnected');
+    setIsSpeaking(false);
+    setVoiceProfile({
+      language: getVoiceLanguage(selectedVoice),
+      voice: selectedVoice,
+    });
+
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current);
+      sessionTimerRef.current = null;
+    }
+
+    if (!hadActiveSession) return;
+
+    const mins = Math.floor(sessionSecondsRef.current / 60);
+    const secs = sessionSecondsRef.current % 60;
+    const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+
+    setSummaryStats({
+      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
+      exercisesPracticed: Array.from(exercisesPracticedRef.current),
+      tipsCovered: [...tipsCoveredRef.current],
+      languageSwitches: languageSwitchesCountRef.current,
+      keyShiftsUsed: keyShiftsCountRef.current,
+      speedChangesUsed: speedChangesCountRef.current,
+      volumeChangesUsed: volumeChangesCountRef.current,
+      messageCount: conversationRef.current.length,
+    });
+    setIsSummaryOpen(true);
+  }, [selectedVoice, stopMicrophone]);
+
+  const applyPlaybackAdjustment = useCallback((command) => {
+    const transition = applyAccompanimentAdjustment({
+      pitchShift: scaleEngine.pitchShift,
+      speed: scaleEngine.speed,
+      volume: scaleEngine.volume,
+    }, command);
+
+    if (transition.control === 'pitch') {
+      scaleEngine.setPitchShift(transition.state.pitchShift);
+      setPlaybackSettings((current) => ({
+        ...current,
+        pitchShift: transition.state.pitchShift,
+      }));
+      if (transition.changed) keyShiftsCountRef.current += 1;
+    } else if (transition.control === 'speed') {
+      scaleEngine.setSpeed(transition.state.speed);
+      setPlaybackSettings((current) => ({
+        ...current,
+        speed: transition.state.speed,
+      }));
+      if (transition.changed) speedChangesCountRef.current += 1;
+    } else if (transition.control === 'volume') {
+      scaleEngine.setVolume(transition.state.volume);
+      setAccompanimentVolumeState(transition.state.volume);
+      if (transition.changed) volumeChangesCountRef.current += 1;
+    }
+
+    return {
+      status: 'success',
+      applied: transition.changed,
+      control: transition.control,
+      previous_value: transition.previousValue,
+      current_value: transition.currentValue,
+    };
+  }, []);
+
+  const selectExercise = useCallback((exerciseId) => {
+    const result = applyExerciseSelection(scaleEngine, exerciseId);
+    setActiveExercise(exerciseId);
+    setIsPlayingAccompaniment(false);
+    setActiveTip(null);
+    exercisesPracticedRef.current.add(EXERCISE_NAMES[exerciseId]);
+    return result;
   }, []);
 
   // Process Tool Calls (AssemblyAI Voice Agent Function Calling)
@@ -152,18 +272,21 @@ export function useVoiceAgent() {
     if (typeof parameters === 'string') {
       try {
         parameters = JSON.parse(parameters);
-      } catch (e) {
-        console.warn('Could not parse tool parameters:', parameters);
+      } catch {
+        throw new Error('Could not parse tool parameters.');
       }
     }
 
     console.log(`[Tool Call Received]: ${name}`, parameters);
 
-    if (name === 'switch_language_voice') {
+    if (name === 'switch_language') {
       const lang = parameters.language || 'en';
-      const voice = parameters.voice || (lang === 'es' ? 'lola' : 'eve');
-      setVoiceProfile({ language: lang, voice });
+      setVoiceProfile((current) => ({ ...current, language: lang }));
       languageSwitchesCountRef.current += 1;
+      return { status: 'success', applied: true, language: lang };
+    } else if (name === 'end_session') {
+      pendingVoiceEndRef.current = true;
+      return { status: 'success', applied: true };
     } else if (name === 'show_vocal_tip') {
       const tipObj = {
         tipType: parameters.tip_type || 'posture',
@@ -172,30 +295,40 @@ export function useVoiceAgent() {
         timestamp: new Date().toLocaleTimeString(),
       };
       setActiveTip(tipObj);
-      tipsCoveredRef.current.push(tipObj);
-    } else if (name === 'adjust_music_playback') {
-      keyShiftsCountRef.current += 1;
-      setPlaybackSettings((prev) => {
-        const nextPitch = parameters.pitch_shift !== undefined ? parameters.pitch_shift : prev.pitchShift;
-        const nextSpeed = parameters.playback_speed !== undefined ? parameters.playback_speed : prev.speed;
-        scaleEngine.setPitchShift(nextPitch);
-        scaleEngine.setSpeed(nextSpeed);
-        return { pitchShift: nextPitch, speed: nextSpeed };
-      });
-    } else if (name === 'select_exercise') {
-      if (parameters.exercise_id) {
-        const exNames = {
-          warmup_breathing: 'Diaphragmatic Breathing',
-          warmup_lip_trill: 'Lip Trill Scale',
-          warmup_sirens: 'Vocal Sirens',
-          song_practice: 'Free Song Practice',
+      tipsCoveredRef.current = upsertCoveredTip(tipsCoveredRef.current, tipObj);
+      return { status: 'success', applied: true, tip_type: tipObj.tipType };
+    } else if (name === 'control_accompaniment') {
+      const action = parameters.action;
+      if (action === 'play') {
+        const wasPlaying = scaleEngine.isPlaying;
+        if (!wasPlaying) scaleEngine.start();
+        setIsPlayingAccompaniment(true);
+        return {
+          status: 'success',
+          applied: !wasPlaying,
+          playback: 'playing',
+          exercise_id: scaleEngine.currentExercise,
         };
-        setActiveExercise(parameters.exercise_id);
-        scaleEngine.setExercise(parameters.exercise_id);
-        exercisesPracticedRef.current.add(exNames[parameters.exercise_id] || parameters.exercise_id);
       }
+      if (action === 'stop') {
+        const wasPlaying = scaleEngine.isPlaying;
+        scaleEngine.stop();
+        setIsPlayingAccompaniment(false);
+        return {
+          status: 'success',
+          applied: wasPlaying,
+          playback: 'stopped',
+        };
+      }
+      throw new Error(`Unsupported accompaniment action: ${action || 'missing'}`);
+    } else if (name === 'adjust_accompaniment') {
+      return applyPlaybackAdjustment(parameters);
+    } else if (name === 'select_exercise') {
+      return selectExercise(parameters.exercise_id);
     }
-  }, []);
+
+    throw new Error(`Unsupported tool: ${name || 'unknown'}`);
+  }, [applyPlaybackAdjustment, selectExercise]);
 
   // Connect to the Voice Agent
   const connect = useCallback(async () => {
@@ -203,6 +336,17 @@ export function useVoiceAgent() {
       setStatus('connecting');
       setErrorMessage(null);
       setIsSummaryOpen(false);
+      setConversation([]);
+      conversationRef.current = [];
+      setUserTranscript('');
+      setAgentTranscript('');
+      setActiveTip(null);
+      pendingVoiceEndRef.current = false;
+      processedToolCallsRef.current.clear();
+      setVoiceProfile({
+        language: getVoiceLanguage(selectedVoice),
+        voice: selectedVoice,
+      });
 
       // Reset and start session metrics timer
       sessionSecondsRef.current = 0;
@@ -211,6 +355,17 @@ export function useVoiceAgent() {
       tipsCoveredRef.current = [];
       languageSwitchesCountRef.current = 0;
       keyShiftsCountRef.current = 0;
+      speedChangesCountRef.current = 0;
+      volumeChangesCountRef.current = 0;
+
+      resetAccompanimentEngine(scaleEngine);
+      setActiveExercise('warmup_breathing');
+      setIsPlayingAccompaniment(false);
+      setPlaybackSettings({
+        pitchShift: DEFAULT_ACCOMPANIMENT_STATE.pitchShift,
+        speed: DEFAULT_ACCOMPANIMENT_STATE.speed,
+      });
+      setAccompanimentVolumeState(DEFAULT_ACCOMPANIMENT_STATE.volume);
 
       if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
       sessionTimerRef.current = setInterval(() => {
@@ -220,13 +375,13 @@ export function useVoiceAgent() {
 
       await pcmPlayerRef.current?.init();
 
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(getAgentWebSocketUrl(selectedVoice));
       wsRef.current = ws;
 
-      ws.onopen = async () => {
+      ws.onopen = () => {
         console.log('Connected to Voice Agent proxy');
+        sessionActiveRef.current = true;
         setStatus('connected');
-        await startMicrophone(ws);
       };
 
       ws.onmessage = async (event) => {
@@ -241,7 +396,17 @@ export function useVoiceAgent() {
           const message = JSON.parse(event.data);
           const eventType = message.type || message.event;
 
-          // 1. Error
+          // 1. Session configuration/runtime error
+          if (eventType === 'session.error') {
+            console.error('[AssemblyAI Session Error]:', message);
+            const code = message.code || message.error?.code;
+            const detail = message.message || message.error?.message || 'Voice session error';
+            setErrorMessage(`${code ? `${code}: ` : ''}${detail}`);
+            setStatus('error');
+            return;
+          }
+
+          // 2. General proxy/service error
           if (eventType === 'error') {
             console.error('[AssemblyAI Error]:', message);
             setErrorMessage(message.message || 'Voice service error');
@@ -249,7 +414,7 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 2. Incoming TTS audio chunk from agent (Base64)
+          // 3. Incoming TTS audio chunk from agent (Base64)
           if (eventType === 'reply.audio') {
             setIsSpeaking(true);
             const audioData = message.data || message.audio;
@@ -259,23 +424,27 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 3. Agent reply started
+          // 4. Agent reply started
           if (eventType === 'reply.started') {
             setIsSpeaking(true);
             return;
           }
 
-          // 4. Agent reply done (or barge-in interrupted)
+          // 5. Agent reply done (or barge-in interrupted)
           if (eventType === 'reply.done') {
-            if (message.status === 'interrupted' || message.interrupted) {
+            const wasInterrupted = message.status === 'interrupted' || message.interrupted;
+            if (wasInterrupted) {
               console.log('[Barge-in]: Agent interrupted by user');
               pcmPlayerRef.current?.stopAll();
             }
             setIsSpeaking(false);
+            if (pendingVoiceEndRef.current && wasInterrupted) {
+              pendingVoiceEndRef.current = false;
+            }
             return;
           }
 
-          // 5. Interruption event
+          // 6. Interruption event
           if (eventType === 'interruption' || message.interrupted) {
             console.log('[Barge-in]: Interruption detected');
             pcmPlayerRef.current?.stopAll();
@@ -283,48 +452,112 @@ export function useVoiceAgent() {
             return;
           }
 
-          // 6. Agent transcript
+          // 7. Agent transcript
           if (eventType === 'transcript.agent' || (eventType === 'transcript' && message.role === 'agent')) {
             const text = message.text || '';
             if (text) {
               setAgentTranscript(text);
-              setConversation((prev) => [
-                ...prev,
-                { role: 'agent', text, time: new Date().toLocaleTimeString() }
-              ]);
+              setConversation((prev) => {
+                const next = [
+                  ...prev,
+                  { role: 'agent', text, time: new Date().toLocaleTimeString() }
+                ];
+                conversationRef.current = next;
+                return next;
+              });
             }
             return;
           }
 
-          // 7. User transcript
+          // 8. User transcript
           if (eventType === 'transcript.user' || (eventType === 'transcript' && message.role === 'user')) {
             const text = message.text || '';
             if (text) {
+              const isNoisePattern = /^(dun|la|brr|hum|na|bum|\.|\s)+$/i.test(text.trim());
               setUserTranscript(text);
-              setConversation((prev) => [
-                ...prev,
-                { role: 'user', text, time: new Date().toLocaleTimeString() }
-              ]);
+              if (!isNoisePattern) {
+                setConversation((prev) => {
+                  const next = [
+                    ...prev,
+                    { role: 'user', text, time: new Date().toLocaleTimeString() }
+                  ];
+                  conversationRef.current = next;
+                  return next;
+                });
+              }
             }
             return;
           }
 
-          // 8. Partial user delta transcript
+          // 9. Partial user delta transcript
           if (eventType === 'transcript.user.delta') {
             setUserTranscript(message.text || message.delta || '');
             return;
           }
 
-          // 9. Tool Calling
+          // 10. Tool Calling
           if (eventType === 'tool.call' || eventType === 'tool_call') {
-            handleToolCall(message.tool || message);
+            const toolData = message.tool || message;
+            const callId = toolData.call_id || toolData.id || message.call_id || message.id;
+            if (!callId) {
+              console.warn('Tool call received without call_id:', toolData);
+              return;
+            }
+
+            let outcome = processedToolCallsRef.current.get(callId);
+            if (!outcome) {
+              try {
+                outcome = {
+                  result: handleToolCall(toolData),
+                  is_error: false,
+                };
+              } catch (toolError) {
+                console.error(`[Tool Execution Error]: ${toolData.name || 'unknown'}`, toolError);
+                outcome = {
+                  result: {
+                    status: 'error',
+                    applied: false,
+                    message: toolError instanceof Error ? toolError.message : 'Tool execution failed.',
+                  },
+                  is_error: true,
+                };
+              }
+              processedToolCallsRef.current.set(callId, outcome);
+            }
+
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'client.tool_result',
+                call_id: callId,
+                result: outcome.result,
+                is_error: outcome.is_error,
+              }));
+            }
+            return;
+          }
+
+          // Wait until the farewell audio queue is empty before ending the upstream session.
+          if (eventType === 'proxy.playback_drain_requested') {
+            const drainResult = await pcmPlayerRef.current?.waitForIdle();
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({
+                type: 'client.playback_drained',
+                timed_out: Boolean(drainResult?.timedOut),
+              }));
+            }
             return;
           }
 
           if (eventType === 'session.ready') {
             console.log('Voice Agent session ready for audio streaming');
+            await startMicrophone(ws);
+            return;
           }
-        } catch (e) {
+
+          if (eventType === 'session.ended') {
+            finishSession();
+          }
+        } catch {
           console.warn('Non-JSON message received:', event.data);
         }
       };
@@ -337,17 +570,16 @@ export function useVoiceAgent() {
 
       ws.onclose = () => {
         console.log('WebSocket closed');
-        setStatus('disconnected');
-        stopMicrophone();
-        pcmPlayerRef.current?.stopAll();
-        setIsSpeaking(false);
+        if (wsRef.current && wsRef.current !== ws) return;
+        if (wsRef.current === ws) wsRef.current = null;
+        finishSession({ closeSocket: false });
       };
     } catch (err) {
       console.error('Initialization error:', err);
       setStatus('error');
       setErrorMessage(err.message);
     }
-  }, [handleToolCall]);
+  }, [finishSession, handleToolCall, selectedVoice]);
 
   // Toggle accompaniment playback
   const toggleAccompaniment = useCallback(() => {
@@ -364,59 +596,35 @@ export function useVoiceAgent() {
 
   // Adjust volume for accompaniment track
   const setAccompanimentVolume = useCallback((vol) => {
-    setAccompanimentVolumeState(vol);
-    scaleEngine.setVolume(vol);
-  }, []);
+    applyPlaybackAdjustment({
+      control: 'volume',
+      operation: 'set',
+      value: vol * 100,
+    });
+  }, [applyPlaybackAdjustment]);
 
   // Manually transpose pitch (+/- semitones)
   const adjustPitchManually = useCallback((delta) => {
-    setPlaybackSettings((prev) => {
-      const newShift = Math.max(-6, Math.min(6, prev.pitchShift + delta));
-      scaleEngine.setPitchShift(newShift);
-      return { ...prev, pitchShift: newShift };
+    applyPlaybackAdjustment({
+      control: 'pitch',
+      operation: delta >= 0 ? 'increase' : 'decrease',
+      value: Math.abs(delta),
     });
-  }, []);
+  }, [applyPlaybackAdjustment]);
 
   // Manually adjust tempo speed factor
   const adjustSpeedManually = useCallback((newSpeed) => {
-    setPlaybackSettings((prev) => {
-      scaleEngine.setSpeed(newSpeed);
-      return { ...prev, speed: newSpeed };
+    applyPlaybackAdjustment({
+      control: 'speed',
+      operation: 'set',
+      value: newSpeed,
     });
-  }, []);
+  }, [applyPlaybackAdjustment]);
 
   // Disconnect session and generate workout report
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    stopMicrophone();
-    pcmPlayerRef.current?.stopAll();
-    scaleEngine.stop();
-    setIsPlayingAccompaniment(false);
-    setStatus('disconnected');
-    setIsSpeaking(false);
-
-    if (sessionTimerRef.current) {
-      clearInterval(sessionTimerRef.current);
-      sessionTimerRef.current = null;
-    }
-
-    const mins = Math.floor(sessionSecondsRef.current / 60);
-    const secs = sessionSecondsRef.current % 60;
-    const durationFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-
-    setSummaryStats({
-      durationFormatted: sessionSecondsRef.current > 0 ? durationFormatted : '00:45',
-      exercisesPracticed: Array.from(exercisesPracticedRef.current),
-      tipsCovered: [...tipsCoveredRef.current],
-      languageSwitches: languageSwitchesCountRef.current,
-      keyShiftsUsed: keyShiftsCountRef.current,
-      messageCount: conversation.length,
-    });
-    setIsSummaryOpen(true);
-  }, [conversation.length]);
+    finishSession();
+  }, [finishSession]);
 
   const closeSummary = useCallback(() => {
     setIsSummaryOpen(false);
@@ -436,9 +644,8 @@ export function useVoiceAgent() {
     activeTip,
     setActiveTip,
     playbackSettings,
-    setPlaybackSettings,
     activeExercise,
-    setActiveExercise,
+    setActiveExercise: selectExercise,
     isPlayingAccompaniment,
     toggleAccompaniment,
     currentNote,
@@ -454,8 +661,9 @@ export function useVoiceAgent() {
     closeSummary,
     sessionSeconds,
     errorMessage,
+    selectedVoice,
+    selectVoice,
     voiceProfile,
-    switchVoiceManual,
     connect,
     disconnect,
   };
