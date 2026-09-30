@@ -46,3 +46,9 @@ Thumbs.db
 AGENTS/
 CONTEXT/
 IDEAS/
+
+# Local hackathon submission materials
+submission/
+.submission-build/
+.codex-finalizer/
+tmp/pdfs/

@@ -6,7 +6,8 @@ Built for the [AssemblyAI Voice Agent Challenge](https://lablab.ai/ai-hackathons
 
 ## Demo links
 
-- **Live app:** deployment in progress
+- **Live app:** [vox-flow-ai-agent.vercel.app](https://vox-flow-ai-agent.vercel.app)
+- **Backend health:** [voxflow-backend-37k3.onrender.com/api/health](https://voxflow-backend-37k3.onrender.com/api/health)
 - **Demo video:** publishing in progress
 - **Pitch deck:** publishing in progress
 - **Source code:** [github.com/VRojas1603/VoxFlow-AI-Agent](https://github.com/VRojas1603/VoxFlow-AI-Agent)
@@ -56,6 +57,24 @@ The React client captures 24 kHz PCM audio through an `AudioWorklet`. Conversati
 - **Backend:** Python 3.11, FastAPI, Uvicorn, WebSockets, Pydantic Settings.
 - **Voice AI:** AssemblyAI Voice Agent API.
 - **Production:** Vercel for the frontend and Render for the backend.
+
+## How AssemblyAI is used
+
+VoxFlow connects to the AssemblyAI Voice Agent API through a bidirectional WebSocket proxy. AssemblyAI provides the real-time conversational layer while the browser handles pitch measurement and deterministic exercise evaluation.
+
+- **Real-time Voice Agent API:** Maintains the live coaching conversation between the user and Lyra over a single WebSocket session.
+- **Streaming speech recognition:** Converts 24 kHz PCM microphone audio into live user transcripts for the conversation history.
+- **Spoken responses:** Generates Lyra's voice and streams the resulting audio back to the browser for immediate playback.
+- **Turn taking and voice activity detection:** Determines when the user has finished speaking and when Lyra should respond.
+- **Barge-in support:** Allows the user to interrupt an active spoken response and continue the conversation naturally.
+- **LLM orchestration:** Interprets requests, maintains session context, follows the vocal-coaching prompt, and produces concise responses.
+- **JSON Schema tool calling:** Converts spoken requests into structured actions for exercise selection, technique tips, accompaniment controls, Notes Practice, language updates, and session completion.
+- **Configurable output voices:** Lets the user select an English or Spanish voice before starting a session. The selected voice remains fixed until the session ends.
+- **English and Spanish recognition:** Restricts input language detection to English and Spanish while supporting code-switching during the conversation.
+- **Low-latency transcription mode:** Uses `min_latency` to keep voice interactions responsive during practice.
+- **Session lifecycle events:** Coordinates session configuration, audio streaming, transcripts, tool calls, tool results, interruptions, and orderly session completion.
+
+AssemblyAI does not calculate vocal pitch or grade exercise performance in VoxFlow. Pitch detection, cents deviation, note stability, exercise rubrics, and report metrics run locally in the browser. At the end of the session, only a bounded summary of those measurements is sent to Lyra so the spoken feedback remains grounded in recorded results.
 
 ## Local setup
 
