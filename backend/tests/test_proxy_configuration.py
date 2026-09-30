@@ -70,6 +70,26 @@ class ProxyConfigurationTests(unittest.TestCase):
         self.assertIn("three-second visual countdown", tool["description"])
         self.assertIn("finish within three seconds", tool["response_instructions"]["success"])
 
+    def test_notes_practice_has_dedicated_controls_and_tool_enums(self):
+        tools = {tool["name"]: tool for tool in VOICE_TOOLS}
+        notes_tool = tools["control_notes_practice"]
+        selection_tool = tools["select_exercise"]
+        tip_tool = tools["show_vocal_tip"]
+
+        self.assertEqual(
+            notes_tool["parameters"]["properties"]["action"]["enum"],
+            ["start", "stop"],
+        )
+        self.assertIn(
+            "notes_practice",
+            selection_tool["parameters"]["properties"]["exercise_id"]["enum"],
+        )
+        self.assertIn(
+            "notes_practice",
+            tip_tool["parameters"]["properties"]["tip_type"]["enum"],
+        )
+        self.assertIn("no accompaniment", notes_tool["description"].lower())
+
     def test_accompaniment_adjustment_distinguishes_relative_and_absolute_changes(self):
         tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "adjust_accompaniment")
         properties = tool["parameters"]["properties"]

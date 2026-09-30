@@ -1,6 +1,7 @@
 const PROTECTED_EXERCISES = new Set([
   'warmup_lip_trill',
   'warmup_sirens',
+  'notes_practice',
 ]);
 
 export function shouldPauseAgentAudio({ phase, exerciseId }) {

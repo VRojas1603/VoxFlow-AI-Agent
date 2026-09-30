@@ -120,6 +120,50 @@ def _sanitize_siren_attempt(attempt: Any) -> dict[str, Any] | None:
     }
 
 
+def _sanitize_notes_practice_attempt(attempt: Any) -> dict[str, Any] | None:
+    if not isinstance(attempt, dict):
+        return None
+    metrics = attempt.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    raw_notes = metrics.get("note_results")
+    if not isinstance(raw_notes, list):
+        raw_notes = []
+    note_results = []
+    for note in raw_notes[:4]:
+        if not isinstance(note, dict):
+            continue
+        note_results.append({
+            "note_name": _bounded_text(note.get("note_name"))[:8],
+            "frequency_hz": _bounded_number(note.get("frequency_hz"), 20, 5000),
+            "completed": bool(note.get("completed")),
+            "time_to_match_ms": _bounded_number(note.get("time_to_match_ms"), 0, 60000),
+            "best_deviation_cents": _bounded_number(
+                note.get("best_deviation_cents"), 0, 2400,
+            ),
+        })
+    return {
+        "attempt_number": _bounded_number(attempt.get("attempt_number"), 1, 100),
+        "signal_quality": _sanitize_signal_quality(attempt.get("signal_quality")),
+        "metrics": {
+            "completed_notes": _bounded_number(metrics.get("completed_notes"), 0, 4),
+            "expected_notes": _bounded_number(metrics.get("expected_notes"), 0, 4),
+            "completion_percent": _bounded_number(
+                metrics.get("completion_percent"), 0, 100,
+            ),
+            "median_deviation_cents": _bounded_number(
+                metrics.get("median_deviation_cents"), 0, 2400,
+            ),
+            "valid_samples": _bounded_number(metrics.get("valid_samples"), 0, 10000),
+            "rejected_samples": _sanitize_rejected_samples(
+                metrics.get("rejected_samples"),
+            ),
+            "note_results": note_results,
+        },
+        **_sanitize_feedback(attempt),
+    }
+
+
 def _sanitize_signal_quality(value: Any) -> str:
     return value if value in {"valid", "partial", "insufficient"} else "insufficient"
 
@@ -151,6 +195,10 @@ def sanitize_performance_summary(value: Any) -> dict[str, Any]:
         "vocal_siren_attempts": _sanitize_attempts(
             summary.get("vocal_siren_attempts"),
             _sanitize_siren_attempt,
+        ),
+        "notes_practice_attempts": _sanitize_attempts(
+            summary.get("notes_practice_attempts"),
+            _sanitize_notes_practice_attempt,
         ),
         "deterministic_feedback": {
             "text": _bounded_text(deterministic_feedback.get("text")),

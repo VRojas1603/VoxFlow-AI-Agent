@@ -18,8 +18,8 @@ VOICE_LANGUAGES = {
 }
 
 GREETINGS = {
-    "en": "Hello! I'm Lyra, your vocal coach today. Ready to warm up your voice, or would you like to jump straight into practicing a song?",
-    "es": "¡Hola! Soy Lyra, tu coach vocal hoy. ¿Listo para calentar tu voz o prefieres practicar directamente una canción?",
+    "en": "Hello! I'm Lyra, your vocal coach today. Ready to warm up your voice or practice matching some notes?",
+    "es": "¡Hola! Soy Lyra, tu coach vocal hoy. ¿Lista para calentar tu voz o practicar afinando algunas notas?",
 }
 
 SYSTEM_PROMPT_TEMPLATE = """You are 'Lyra', a professional, inspiring, and proactive vocal coach and singing pedagogy expert. Your mission is to prepare the user's voice for singing, prevent vocal strain/fatigue, and teach practical vocal techniques.
@@ -33,12 +33,13 @@ Core Language & Code-Switching Rules:
 6. Spoken brevity: Keep your spoken answers to 1 or 2 dynamic, clear sentences per turn so the vocal practice remains fast-paced.
 7. Proactive Leadership & Immediate Action:
    - Act as an energetic, proactive coach leading the session.
-   - When the user asks to start or stop the accompaniment, change speed, pitch, or volume, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('control_accompaniment', 'adjust_accompaniment', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN.
+   - When the user asks to start or stop the accompaniment, start or stop Notes Practice, change speed, pitch, or volume, explain a technique, or switch exercises, IMMEDIATELY call the matching tool ('control_accompaniment', 'control_notes_practice', 'adjust_accompaniment', 'select_exercise', 'show_vocal_tip') in the EXACT SAME TURN.
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
    - For relative requests such as "raise it by 2" or "make it slower", call 'adjust_accompaniment' with operation 'increase' or 'decrease'. For target requests such as "set it to 0" or "back to 1x", use operation 'set'.
    - If the user gives no amount, use 1 semitone for pitch, 0.15 for speed, or 10 percentage points for volume.
    - Treat every request to make the accompaniment, track, scale, or music louder, quieter, softer, or to turn its volume up or down as an 'adjust_accompaniment' volume request. The app can control accompaniment volume, so never redirect the user to device volume controls.
    - Example: "increase the volume a little bit" means control 'volume', operation 'increase', value 10. "Turn it down" means control 'volume', operation 'decrease', value 10.
+   - Notes Practice has no accompaniment. When it is selected, use 'control_notes_practice' to start or stop the silent measured attempt. Pitch changes transpose its four target notes; speed and volume do not apply.
 8. Explicit visual guidance only:
    - Invoke 'show_vocal_tip' only when the user explicitly asks how to perform a technique, requests an explanation or instructions, or asks to see a guide.
    - Do NOT invoke 'show_vocal_tip' merely because an exercise was selected, introduced, or changed.
@@ -50,7 +51,7 @@ Core Language & Code-Switching Rules:
    - If one request both selects an exercise and asks how to perform it, call 'select_exercise' and 'show_vocal_tip' in that same turn, then explain it aloud.
    - Examples that require a spoken tip: "How do I do a lip trill?", "Explain the current exercise", and "How can I do this properly?"
 11. Non-Word Vocalizations & Singing Practice:
-   - Treat isolated singing sounds, humming ("mm", "mhm"), lip trill vibrations ("brrr"), sustained vowels, and scale syllables ("dun dun", "la la") as measured vocal practice rather than text commands.
+   - Treat isolated singing sounds, humming ("mm", "mhm"), lip trill vibrations ("brrr"), sustained vowels, and scale syllables ("dun dun", "la la") as measured vocal practice rather than text commands, including while the user matches targets in Notes Practice.
    - Do not reply to these isolated practice sounds, invoke tools for them, or invent immediate feedback. The app measures guided attempts locally and provides their results at session end.
 12. Session closure:
    - When the user says goodbye or asks to end the session, invoke 'end_session' immediately without saying goodbye, summarizing performance, or continuing the lesson first.
@@ -107,7 +108,7 @@ VOICE_TOOLS = [
             "properties": {
                 "tip_type": {
                     "type": "string",
-                    "enum": ["diaphragm_breath", "lip_trill", "head_voice", "posture", "vocal_siren"],
+                    "enum": ["diaphragm_breath", "lip_trill", "head_voice", "posture", "vocal_siren", "notes_practice"],
                 },
                 "title": {"type": "string", "description": "Short title of the technique"},
                 "explanation": {"type": "string", "description": "1-2 sentence explanation of how to execute the technique"},
@@ -167,6 +168,26 @@ VOICE_TOOLS = [
     },
     {
         "type": "function",
+        "name": "control_notes_practice",
+        "description": "Starts or stops the silent Notes Practice measurement. Use only when Notes Practice is the active exercise. Starting schedules a three-second countdown; no accompaniment is played.",
+        "response_instructions": {
+            "success": "If practice is scheduled, say only that note matching will start after the countdown. Keep the confirmation under three seconds. If stopped, briefly confirm that measurement stopped.",
+            "error": "Briefly say that Notes Practice could not be started or stopped.",
+        },
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "stop"],
+                    "description": "Use 'start' to begin measuring the four notes and 'stop' to finish the current attempt.",
+                }
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "type": "function",
         "name": "select_exercise",
         "description": "Selects the active warm-up exercise, stops the current accompaniment, and clears any previous tip card. Do not show a new tip unless the user also asks for guidance.",
         "response_instructions": {
@@ -178,7 +199,7 @@ VOICE_TOOLS = [
             "properties": {
                 "exercise_id": {
                     "type": "string",
-                    "enum": ["warmup_breathing", "warmup_lip_trill", "warmup_sirens", "song_practice"],
+                    "enum": ["warmup_breathing", "warmup_lip_trill", "warmup_sirens", "notes_practice"],
                 }
             },
             "required": ["exercise_id"],

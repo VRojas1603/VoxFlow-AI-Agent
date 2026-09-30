@@ -32,6 +32,32 @@ class PerformanceSummaryTests(unittest.TestCase):
                 "unsupported": "discard me",
             }],
             "vocal_siren_attempts": [],
+            "notes_practice_attempts": [{
+                "attempt_number": 2,
+                "signal_quality": "partial",
+                "metrics": {
+                    "completed_notes": 3,
+                    "expected_notes": 4,
+                    "completion_percent": 75,
+                    "median_deviation_cents": 14.2,
+                    "valid_samples": 42,
+                    "rejected_samples": {
+                        "quiet": 3,
+                        "unclear": 2,
+                        "out_of_range": 1,
+                    },
+                    "note_results": [{
+                        "note_name": "C4",
+                        "frequency_hz": 261.6,
+                        "completed": True,
+                        "time_to_match_ms": 820,
+                        "best_deviation_cents": 4.5,
+                    }],
+                },
+                "strengths": ["Three notes were matched."],
+                "focus_areas": ["Hold the final note."],
+                "next_action": "Repeat the four-note pattern.",
+            }],
             "deterministic_feedback": {
                 "text": "Pitch stayed centered. Connect the last two notes.",
                 "next_action": "Repeat once at the same speed.",
@@ -46,6 +72,10 @@ class PerformanceSummaryTests(unittest.TestCase):
         self.assertNotIn("unsupported", attempt)
         self.assertNotIn("unsupported", attempt["metrics"])
         self.assertNotIn("unsupported", summary)
+        notes_attempt = summary["notes_practice_attempts"][0]
+        self.assertEqual(notes_attempt["metrics"]["completed_notes"], 3)
+        self.assertEqual(notes_attempt["metrics"]["note_results"][0]["note_name"], "C4")
+        self.assertEqual(notes_attempt["metrics"]["rejected_samples"]["unclear"], 2)
 
     def test_clamps_numbers_and_limits_text_and_attempt_counts(self):
         summary = sanitize_performance_summary({
@@ -80,6 +110,7 @@ class PerformanceSummaryTests(unittest.TestCase):
         self.assertEqual(summary["breathing_cycles"], 0)
         self.assertEqual(summary["lip_trill_attempts"], [])
         self.assertEqual(summary["vocal_siren_attempts"], [])
+        self.assertEqual(summary["notes_practice_attempts"], [])
         self.assertEqual(summary["deterministic_feedback"]["text"], "")
 
 

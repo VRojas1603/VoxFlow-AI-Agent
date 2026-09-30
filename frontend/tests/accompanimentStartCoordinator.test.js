@@ -167,7 +167,7 @@ test('the tool-call reply completion is ignored before the spoken confirmation s
 test('cancelling a pending start prevents playback', () => {
   const { coordinator, events, scheduler } = createCoordinator();
 
-  coordinator.requestStart({ source: 'manual', exerciseId: 'song_practice' });
+  coordinator.requestStart({ source: 'manual', exerciseId: 'notes_practice' });
   assert.equal(coordinator.cancel(), true);
   scheduler.advance(3000);
 
@@ -178,8 +178,8 @@ test('cancelling a pending start prevents playback', () => {
 test('duplicate starts are rejected while a countdown is active', () => {
   const { coordinator } = createCoordinator();
 
-  const first = coordinator.requestStart({ source: 'manual', exerciseId: 'song_practice' });
-  const duplicate = coordinator.requestStart({ source: 'voice', exerciseId: 'song_practice' });
+  const first = coordinator.requestStart({ source: 'manual', exerciseId: 'notes_practice' });
+  const duplicate = coordinator.requestStart({ source: 'voice', exerciseId: 'notes_practice' });
 
   assert.equal(first.accepted, true);
   assert.equal(duplicate.accepted, false);
