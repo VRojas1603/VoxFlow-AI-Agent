@@ -37,9 +37,15 @@ Core Language & Code-Switching Rules:
    - NEVER ask redundant clarifying questions (such as "how much slower?"). Execute the tool immediately and state what you did in 1 short sentence.
    - For relative requests such as "raise it by 2" or "make it slower", call 'adjust_accompaniment' with operation 'increase' or 'decrease'. For target requests such as "set it to 0" or "back to 1x", use operation 'set'.
    - If the user gives no amount, use 1 semitone for pitch, 0.15 for speed, or 10 percentage points for volume.
-8. Visual guidance: When introducing or explaining a vocal technique (lip trills, breathing, head voice), invoke the tool 'show_vocal_tip' to render the visual guide on screen.
-9. Tool narration: Whenever you explain a vocal technique, ALWAYS call 'show_vocal_tip' and speak the explanation aloud in that same turn. After any tool call, confirm what changed in one short sentence.
-10. Example: User: "How do I do a lip trill?" -> call 'show_vocal_tip' with the visual instructions, then explain aloud how to perform it.
+8. Explicit visual guidance only:
+   - Invoke 'show_vocal_tip' only when the user explicitly asks how to perform a technique, requests an explanation or instructions, or asks to see a guide.
+   - Do NOT invoke 'show_vocal_tip' merely because an exercise was selected, introduced, or changed.
+   - Resolve contextual phrases such as "this exercise", "the current exercise", "how do I do it?", and "how can I do this properly?" to the currently selected exercise.
+9. Tool narration: When the user requests technique guidance, call 'show_vocal_tip' and speak its explanation aloud in the same turn. Never show a silent replacement tip.
+10. Exercise transitions:
+   - When the user only asks to move to another exercise, call 'select_exercise' without 'show_vocal_tip'. The selection stops the current accompaniment.
+   - If one request both selects an exercise and asks how to perform it, call 'select_exercise' and 'show_vocal_tip' in that same turn, then explain it aloud.
+   - Examples that require a spoken tip: "How do I do a lip trill?", "Explain the current exercise", and "How can I do this properly?"
 11. Non-Word Vocalizations & Singing Practice:
    - Treat singing sounds, lip trill vibrations ("brrr"), and scale syllables ("dun dun", "la la") as vocal warm-up practice rather than text commands. Give encouraging feedback on pitch and breath support.
 12. Session closure: When the user says goodbye or asks to end the session, say one brief farewell and invoke 'end_session' in the same turn. Do not continue coaching afterward.
@@ -82,7 +88,7 @@ VOICE_TOOLS = [
     {
         "type": "function",
         "name": "show_vocal_tip",
-        "description": "Displays an educational visual card of vocal technique on the user's screen.",
+        "description": "Displays an educational visual card when the user explicitly asks how to perform a technique, requests instructions, or asks for a guide. Resolve 'this', 'it', or 'the current exercise' from conversation context. Do not call this tool for exercise selection alone.",
         "response_instructions": {
             "success": "Explain the displayed technique aloud in one short sentence.",
             "error": "Explain the technique aloud without claiming that a visual guide was displayed.",
@@ -153,9 +159,9 @@ VOICE_TOOLS = [
     {
         "type": "function",
         "name": "select_exercise",
-        "description": "Switches the active warm-up exercise on the user interface.",
+        "description": "Selects the active warm-up exercise, stops the current accompaniment, and clears any previous tip card. Do not show a new tip unless the user also asks for guidance.",
         "response_instructions": {
-            "success": "Confirm the selected exercise in one short sentence.",
+            "success": "Confirm the selected exercise and that playback is stopped. Do not explain the technique unless the user requested guidance.",
             "error": "Briefly say that the exercise could not be selected.",
         },
         "parameters": {

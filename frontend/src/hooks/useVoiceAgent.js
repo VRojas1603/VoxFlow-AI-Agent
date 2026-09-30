@@ -6,6 +6,11 @@ import {
   applyAccompanimentAdjustment,
   resetAccompanimentEngine,
 } from '../audio/accompanimentControls';
+import {
+  EXERCISE_NAMES,
+  applyExerciseSelection,
+  upsertCoveredTip,
+} from '../audio/exerciseControls';
 import { DEFAULT_VOICE_ID, getVoiceLanguage } from '../data/voices';
 
 const WS_URL = import.meta.env.VITE_WS_PROXY_URL || 'ws://localhost:8000/ws/agent';
@@ -251,6 +256,15 @@ export function useVoiceAgent() {
     };
   }, []);
 
+  const selectExercise = useCallback((exerciseId) => {
+    const result = applyExerciseSelection(scaleEngine, exerciseId);
+    setActiveExercise(exerciseId);
+    setIsPlayingAccompaniment(false);
+    setActiveTip(null);
+    exercisesPracticedRef.current.add(EXERCISE_NAMES[exerciseId]);
+    return result;
+  }, []);
+
   // Process Tool Calls (AssemblyAI Voice Agent Function Calling)
   const handleToolCall = useCallback((toolData) => {
     const name = toolData.name || toolData.function?.name;
@@ -281,7 +295,7 @@ export function useVoiceAgent() {
         timestamp: new Date().toLocaleTimeString(),
       };
       setActiveTip(tipObj);
-      tipsCoveredRef.current.push(tipObj);
+      tipsCoveredRef.current = upsertCoveredTip(tipsCoveredRef.current, tipObj);
       return { status: 'success', applied: true, tip_type: tipObj.tipType };
     } else if (name === 'control_accompaniment') {
       const action = parameters.action;
@@ -310,27 +324,11 @@ export function useVoiceAgent() {
     } else if (name === 'adjust_accompaniment') {
       return applyPlaybackAdjustment(parameters);
     } else if (name === 'select_exercise') {
-      if (parameters.exercise_id) {
-        const exNames = {
-          warmup_breathing: 'Diaphragmatic Breathing',
-          warmup_lip_trill: 'Lip Trill Scale',
-          warmup_sirens: 'Vocal Sirens',
-          song_practice: 'Free Song Practice',
-        };
-        setActiveExercise(parameters.exercise_id);
-        scaleEngine.setExercise(parameters.exercise_id);
-        exercisesPracticedRef.current.add(exNames[parameters.exercise_id] || parameters.exercise_id);
-        return {
-          status: 'success',
-          applied: true,
-          exercise_id: parameters.exercise_id,
-        };
-      }
-      throw new Error('Exercise selection requires an exercise_id.');
+      return selectExercise(parameters.exercise_id);
     }
 
     throw new Error(`Unsupported tool: ${name || 'unknown'}`);
-  }, [applyPlaybackAdjustment]);
+  }, [applyPlaybackAdjustment, selectExercise]);
 
   // Connect to the Voice Agent
   const connect = useCallback(async () => {
@@ -593,19 +591,6 @@ export function useVoiceAgent() {
     });
   }, [applyPlaybackAdjustment]);
 
-  // Select exercise manually or via tool
-  const selectExerciseManual = useCallback((exerciseId) => {
-    const exNames = {
-      warmup_breathing: 'Diaphragmatic Breathing',
-      warmup_lip_trill: 'Lip Trill Scale',
-      warmup_sirens: 'Vocal Sirens',
-      song_practice: 'Free Song Practice',
-    };
-    setActiveExercise(exerciseId);
-    scaleEngine.setExercise(exerciseId);
-    exercisesPracticedRef.current.add(exNames[exerciseId] || exerciseId);
-  }, []);
-
   // Manually transpose pitch (+/- semitones)
   const adjustPitchManually = useCallback((delta) => {
     applyPlaybackAdjustment({
@@ -648,7 +633,7 @@ export function useVoiceAgent() {
     setActiveTip,
     playbackSettings,
     activeExercise,
-    setActiveExercise: selectExerciseManual,
+    setActiveExercise: selectExercise,
     isPlayingAccompaniment,
     toggleAccompaniment,
     currentNote,

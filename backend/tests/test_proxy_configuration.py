@@ -75,6 +75,22 @@ class ProxyConfigurationTests(unittest.TestCase):
         self.assertEqual(properties["operation"]["enum"], ["increase", "decrease", "set"])
         self.assertNotIn("adjust_music_playback", {tool["name"] for tool in VOICE_TOOLS})
 
+    def test_tip_guidance_requires_an_explicit_request(self):
+        session = get_session_update_payload()["session"]
+        prompt = session["system_prompt"]
+        tip_tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "show_vocal_tip")
+
+        self.assertIn("Explicit visual guidance only", prompt)
+        self.assertIn("Do NOT invoke 'show_vocal_tip' merely because an exercise was selected", prompt)
+        self.assertIn("how can I do this properly?", prompt)
+        self.assertIn("exercise selection alone", tip_tool["description"])
+
+    def test_exercise_selection_stops_playback_without_automatic_tip(self):
+        tool = next(tool for tool in VOICE_TOOLS if tool["name"] == "select_exercise")
+
+        self.assertIn("stops the current accompaniment", tool["description"])
+        self.assertIn("Do not show a new tip", tool["description"])
+
     def test_proxy_validates_voice_and_derives_language(self):
         self.assertEqual(resolve_voice_config("LOLA"), ("lola", "es"))
         self.assertEqual(resolve_voice_config("unknown"), ("eve", "en"))
